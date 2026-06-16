@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>THREE.FBXLoader test</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #222; }
+  #info { position: fixed; top: 0; left: 0; right: 0; background: rgba(0,0,0,.78);
+          color: #0f0; font: 12px/1.5 monospace; padding: 8px; white-space: pre-wrap;
+          z-index: 9; max-height: 60vh; overflow: auto; }
+</style>
+</head>
+<body>
+<div id="info">starting...</div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const info = document.getElementById('info');
+const lines = [];
+function log(s){ lines.push(s); console.log(s); info.textContent = lines.join('\n'); }
+info.textContent = '';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2a2a2a);
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 200000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const controls = new OrbitControls(camera, renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.0));
+const dir = new THREE.DirectionalLight(0xffffff, 1.6); dir.position.set(1, 2, 3); scene.add(dir);
+
+log('THREE.FBXLoader loading out.fbx ...');
+const loader = new FBXLoader();
+loader.load('out.fbx',
+  (obj) => {
+    let mesh = 0, geo = 0, mat = 0, verts = 0, tris = 0;
+    obj.traverse(n => {
+      if (n.isMesh) {
+        mesh++;
+        const pos = n.geometry && n.geometry.attributes.position;
+        if (pos) {
+          geo++; verts += pos.count;
+          tris += (n.geometry.index ? n.geometry.index.count / 3 : pos.count / 3);
+        }
+        if (n.material) (Array.isArray(n.material) ? n.material : [n.material]).forEach(m => mat++);
+      }
+    });
+    log('=== LOADED OK (no throw) ===');
+    log('root: ' + obj.type + ', children=' + obj.children.length);
+    log('meshes=' + mesh + '  geometries=' + geo + '  materialSlots=' + mat);
+    log('verts=' + verts + '  triangles=' + Math.round(tris));
+    const box = new THREE.Box3().setFromObject(obj);
+    const sz = box.getSize(new THREE.Vector3());
+    const c = box.getCenter(new THREE.Vector3());
+    log('bbox size=(' + sz.x.toFixed(1) + ',' + sz.y.toFixed(1) + ',' + sz.z.toFixed(1) + ')');
+    log('center=(' + c.x.toFixed(1) + ',' + c.y.toFixed(1) + ',' + c.z.toFixed(1) + ')');
+    log('root position: {"x":' + obj.position.x + ',"y":' + obj.position.y + ',"z":' + obj.position.z + '}');
+    log('root scale: {"x":' + obj.scale.x + ',"y":' + obj.scale.y + ',"z":' + obj.scale.z + '}');
+    log('root quaternion: [' + obj.quaternion.x + ',' + obj.quaternion.y + ',' + obj.quaternion.z + ',' + obj.quaternion.w + ']');
+    scene.add(obj);
+    const maxDim = Math.max(sz.x, sz.y, sz.z) || 100;
+    camera.position.set(c.x + maxDim * 1.2, c.y + maxDim, c.z + maxDim * 1.2);
+    controls.target.copy(c);
+    const grid = new THREE.GridHelper(maxDim * 2, 20); grid.position.copy(c); scene.add(grid);
+    controls.update();
+    animate();
+  },
+  (e) => { if (e.lengthComputable) log('progress ' + (e.loaded / e.total * 100 | 0) + '%'); },
+  (err) => { log('!!! LOAD ERROR: ' + (err && err.message ? err.message : err)); console.error(err); }
+);
+
+function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
