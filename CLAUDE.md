@@ -23,9 +23,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # 转换
 "E:\Blender\blender.exe" --background --factory-startup --python convert_3dxml_to_fbx.py -- lzh.3dxml out.fbx
 # 回读验证
-"E:\Blender\blender.exe" --background --factory-startup --python verify_fbx.py -- out.fbx
+"E:\Blender\blender.exe" --background --factory-startup --python __test__/verify_fbx.py -- out.fbx
 # FBXLoader 浏览器实测（需先起本地服务器避免 CORS）
-python -m http.server 8000   # 然后浏览器开 http://127.0.0.1:8000/test_fbx_loader.html
+python -m http.server 8000   # 然后浏览器开 http://127.0.0.1:8000/__test__/test_fbx_loader.html
 ```
 
 ## 转换脚本架构（convert_3dxml_to_fbx.py）
@@ -46,7 +46,7 @@ python -m http.server 8000   # 然后浏览器开 http://127.0.0.1:8000/test_fbx
 
 **③ 每个实例独立 mesh** — `build_object_mesh()` 每次新建 mesh data（只缓存 XML 解析结果）。**不能**让多个 object 共享同一 mesh，否则 Blender FBX 导出器报 material-index 警告、FBXLoader 丢材质。
 
-**④ 单位换算 + scale + 根基准点** — 3DXML 几何/平移是 mm：`parse_rep_file` 顶点与 `relmatrix_to_mat4` 平移都 ÷1000（`MM_TO_M`）。导出 `apply_unit_scale=True` + `global_scale=0.01`（0.01×100=1）使 FBX 根 `scale≈1`（实际 `0.9999999999999999`，浮点精度）、坐标为米。构建后 `world_bbox()`（前置 `bpy.context.view_layer.update()` 刷新 matrix_world）算包围盒中心，上提到根节点（`root_obj.location=C`，顶层子节点 `matrix_basis.translation-=C`），使 `root.position`=模型几何中心、世界坐标不变。漏掉÷1000 会 position×1000；漏掉 global_scale=0.01 会 scale=100。
+**④ 单位换算 + scale + 根基准点** — 3DXML 几何/平移是 mm：`parse_rep_file` 顶点与 `relmatrix_to_mat4` 平移都 ÷1000（`MM_TO_M`）。**对齐 CATIA/建模人员 FBX（Unity 友好）的导出配方（三要素缺一不可）**：① `clear_scene()` 末尾设 `scene.unit_settings.scale_length=0.01`（声明场景单位=cm）；② `export_fbx()` 用 `apply_unit_scale=True`；③ `global_scale=1.0`。三者配合抵消 Blender 的 m→cm 根 `scale=100` 补偿，得到根 `scale=(1,1,1)`、顶点与 `Lcl Translation` 均为米制——与建模人员手处理 FBX 逐节点 transform 完全同量级（实测同物体 max|T| 与各节点数值逐一吻合）。**关键：单独调 `apply_unit_scale`/`global_scale` 无法把根 scale 降到 1（实测 4 种组合最小只能 100），必须配 `scale_length=0.01`；且这些 kwarg 不碰几何顶点（4 种组合下顶点 SIZE 恒定）**。漏掉÷1000 会 position×1000；漏掉 `scale_length=0.01` 会根 scale=100 且 translation 同比×100。Unity 单位：FBX 头 `UnitScaleFactor` 由 `diagnose_fbx_units.py --patch` 写 100（Blender 硬编码 1.0，Unity 按 USF/100 缩放视觉尺寸），patch 只改 2 个 double、不动几何/transform。构建后 `world_bbox()`（前置 `bpy.context.view_layer.update()` 刷新 matrix_world）算包围盒中心，上提到根节点（`root_obj.location=C`，顶层子节点 `matrix_basis.translation-=C`），使 `root.position`=模型几何中心、世界坐标不变。调单位配方后用 `__test__/verify_export_scale.py`（Blender 内跑）回归：4 配置 × patch USF=100，回读根 scale + 顶点 SIZE 对照标杆。
 
 装配树展开用 `obj.matrix_parent_inverse = Identity` + `obj.matrix_basis = relative_matrix`，保证 `matrix_basis` 就是 local→parent 的 RelativeMatrix。
 

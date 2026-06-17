@@ -42,7 +42,7 @@ const dir = new THREE.DirectionalLight(0xffffff, 1.6); dir.position.set(1, 2, 3)
 
 log('THREE.FBXLoader loading out.fbx ...');
 const loader = new FBXLoader();
-loader.load('out.fbx',
+loader.load('../out.fbx',
   (obj) => {
     let mesh = 0, geo = 0, mat = 0, verts = 0, tris = 0;
     obj.traverse(n => {

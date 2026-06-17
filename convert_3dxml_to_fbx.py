@@ -331,6 +331,12 @@ def clear_scene():
                 bpy.data.lights, bpy.data.images):
         for item in list(col):
             col.remove(item)
+    # Declare the scene unit as cm (scale_length=0.01). Paired with
+    # apply_unit_scale=True at export, this cancels Blender's m->cm root
+    # scale=100 compensation: the exported FBX gets root scale=(1,1,1) with
+    # meter-scale vertices, matching CATIA/modeller FBX output (Unity reads
+    # position/scale at the same magnitude, USF=100 keeps the visual size).
+    bpy.context.scene.unit_settings.scale_length = 0.01
 
 
 def world_bbox():
@@ -367,7 +373,7 @@ def export_fbx(filepath):
         axis_forward='-Z',
         axis_up='Y',
         apply_unit_scale=True,
-        global_scale=0.01,
+        global_scale=1.0,
     )
     try:
         bpy.ops.export_scene.fbx(**full)
@@ -416,8 +422,24 @@ def main():
     root_obj = bpy.data.objects.new(
         REFERENCES.get(root_ref, {}).get('name', 'Root'), None)
     link_obj(root_obj)
-    for top in [i for i in INSTANCES if i['agg'] == root_ref]:
+    top_instances = [i for i in INSTANCES if i['agg'] == root_ref]
+    for top in top_instances:
         expand(top, root_obj, 0)
+    # Single-part files have no Instance3D: the geometry is attached directly
+    # to the root Reference3D via InstanceRep (IsAggregatedBy -> root,
+    # IsInstanceOf -> ReferenceRep). parse_structure already wired that
+    # rep_file onto the root reference, so build it as a child of root_obj.
+    if not top_instances:
+        root_info = REFERENCES.get(root_ref)
+        if root_info and root_info['rep_file']:
+            mesh = build_object_mesh(root_info['rep_file'])
+            if mesh is not None:
+                part = bpy.data.objects.new(
+                    root_info.get('name') or 'Part', mesh)
+                link_obj(part)
+                part.parent = root_obj
+                part.matrix_parent_inverse = Matrix.Identity(4)
+                NODE_COUNT += 1
 
     # Lift the bounding-box center onto the root node: root.position = bbox center,
     # top-level children offset by -C. World coordinates stay identical (rendering

@@ -59,7 +59,7 @@
 ### 1. Blender 回读（结构/几何/材质核对）
 
 ```bash
-"E:\Blender\blender.exe" --background --factory-startup --python verify_fbx.py -- out.fbx
+"E:\Blender\blender.exe" --background --factory-startup --python __test__/verify_fbx.py -- out.fbx
 ```
 
 打印装配树、每个 Mesh 的顶点/材质数、材质颜色样本、世界包围盒。
@@ -71,7 +71,7 @@
 python -m http.server 8000
 ```
 
-浏览器打开 `http://127.0.0.1:8000/test_fbx_loader.html`，页面用 FBXLoader 加载 `out.fbx` 并渲染，左上角输出：mesh 数、三角面数、包围盒。控制台应无 FBX 相关报错。
+浏览器打开 `http://127.0.0.1:8000/__test__/test_fbx_loader.html`，页面用 FBXLoader 加载 `out.fbx`（位于项目根）并渲染，左上角输出：mesh 数、三角面数、包围盒。控制台应无 FBX 相关报错。
 
 ---
 
@@ -112,9 +112,16 @@ axis_up='Y',         # 可选: 'Y' / 'Z'   ← CAD/3DXML 常见为 Y-up 或 Z-up
 
 | 文件 | 作用 |
 |---|---|
+| **根目录（核心）** | |
 | `convert_3dxml_to_fbx.py` | **主转换脚本** |
+| `diagnose_fbx_units.py` | FBX 单位元数据读写/修补（`--patch` 写 `UnitScaleFactor=100`，Unity 友好；导出配方的一部分） |
+| **`__test__/`（验证 / 对比）** | |
 | `verify_fbx.py` | Blender 回读验证脚本 |
-| `test_fbx_loader.html` | THREE.FBXLoader 浏览器测试页 |
+| `verify_export_scale.py` | 导出单位配置回归（Blender 内跑，对照标杆） |
+| `compare_fbx.py` | 裸 FBX 二进制对比（顶点量级 + Model transform） |
+| `compare_in_blender.py` | Blender 导入双 FBX 对比 |
+| `test_fbx_loader.html` | THREE.FBXLoader 浏览器测试页（从根目录起 server，访问 `/__test__/test_fbx_loader.html`） |
+| **数据** | |
 | `lzh.3dxml` | 示例输入 |
 | `out.fbx` | 转换输出（可随时重新生成） |
 
