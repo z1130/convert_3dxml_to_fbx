@@ -1,7 +1,7 @@
 """verify_fbx.py - round-trip check: import the generated FBX and report
 structure / geometry / materials / bounding box.
 
-  blender --background --python verify_fbx.py -- out.fbx
+  blender --background --python verify_fbx.py -- output.fbx
 """
 import sys
 import bpy
@@ -9,7 +9,7 @@ from mathutils import Vector
 
 argv = sys.argv
 argv = argv[argv.index('--') + 1:] if '--' in argv else []
-fbx = argv[0] if argv else 'out.fbx'
+fbx = argv[0] if argv else 'output.fbx'
 
 for o in list(bpy.data.objects):
     bpy.data.objects.remove(o, do_unlink=True)

@@ -1,9 +1,12 @@
-"""verify_export_scale.py - build lzh.3dxml once, export under 4 unit-scale
+"""verify_export_scale.py - build input.3dxml once, export under 4 unit-scale
 configs, patch each to USF=100, re-import to report root scale + vertex SIZE.
 
 Goal: find the export config that yields root scale=(1,1,1) with meter-scale
 vertices (matching the modeller's reference), proving the fix does NOT shrink
 geometry 100x. Read-only experiment - writes only to the system temp dir.
+
+Usage:
+  blender --background --python __test__/verify_export_scale.py -- <input.3dxml> <reference.fbx>
 """
 import os
 import sys
@@ -19,9 +22,6 @@ sys.path.insert(0, _ROOT)
 import convert_3dxml_to_fbx as C
 import diagnose_fbx_units as D
 
-IN = os.path.join(_ROOT, 'lzh.3dxml')
-REF = os.path.join(_ROOT, '3L氮气瓶的安装GU2291010-000-001.fbx')
-
 BASE = dict(use_selection=False, object_types={'EMPTY', 'MESH'},
             mesh_smooth_type='FACE', use_mesh_modifiers=True, bake_anim=False,
             add_leaf_bones=False, use_metadata=False,
@@ -36,9 +36,9 @@ CONFIGS = [
 ]
 
 
-def build_scene():
+def build_scene(in_path):
     C.TMPDIR = tempfile.mkdtemp(prefix='ver_')
-    with zipfile.ZipFile(IN) as z:
+    with zipfile.ZipFile(in_path) as z:
         z.extractall(C.TMPDIR)
     manifest = ET.parse(os.path.join(C.TMPDIR, 'Manifest.xml')).getroot()
     main_file = 'test.3dxml'
@@ -101,28 +101,49 @@ def fmt(rs, size):
     return f'root_scale={rss}  vertSIZE={szs}'
 
 
-build_scene()
-us = bpy.context.scene.unit_settings
+def main():
+    argv = sys.argv
+    if '--' in argv:
+        argv = argv[argv.index('--') + 1:]
+    else:
+        argv = []
 
-print('\n=== export phase (scene unchanged by export) ===')
-outs = {}
-for name, unit_scale, cfg in CONFIGS:
-    us.scale_length = unit_scale
-    out = os.path.join(tempfile.gettempdir(), f'ver_{name}.fbx')
-    try:
-        bpy.ops.export_scene.fbx(filepath=out, **dict(BASE, **cfg))
-        outs[name] = out
-        print(f'  exported {name}  (scene scale_length={unit_scale})')
-    except Exception as e:
-        print(f'  {name} EXPORT FAIL {e}')
+    if len(argv) < 2:
+        print('[error] 用法: blender --background --python __test__/verify_export_scale.py -- <input.3dxml> <reference.fbx>')
+        sys.exit(1)
 
-print('\n=== inspect (all patched USF=100) ===')
-for name, path in outs.items():
-    try:
-        D.patch(path, path)
-        rs, size = inspect(path)
-        print(f'{name:22} {fmt(rs, size)}')
-    except Exception as e:
-        print(f'{name:22} INSPECT FAIL {e}')
-rs, size = inspect(REF)
-print(f'{"REFERENCE":22} {fmt(rs, size)}  <- target')
+    in_path = os.path.abspath(argv[0])
+    ref_path = os.path.abspath(argv[1])
+
+    print(f'[info] input     = {in_path}')
+    print(f'[info] reference = {ref_path}')
+
+    build_scene(in_path)
+    us = bpy.context.scene.unit_settings
+
+    print('\n=== export phase (scene unchanged by export) ===')
+    outs = {}
+    for name, unit_scale, cfg in CONFIGS:
+        us.scale_length = unit_scale
+        out = os.path.join(tempfile.gettempdir(), f'ver_{name}.fbx')
+        try:
+            bpy.ops.export_scene.fbx(filepath=out, **dict(BASE, **cfg))
+            outs[name] = out
+            print(f'  exported {name}  (scene scale_length={unit_scale})')
+        except Exception as e:
+            print(f'  {name} EXPORT FAIL {e}')
+
+    print('\n=== inspect (all patched USF=100) ===')
+    for name, path in outs.items():
+        try:
+            D.patch(path, path)
+            rs, size = inspect(path)
+            print(f'{name:22} {fmt(rs, size)}')
+        except Exception as e:
+            print(f'{name:22} INSPECT FAIL {e}')
+    rs, size = inspect(ref_path)
+    print(f'{"REFERENCE":22} {fmt(rs, size)}  <- target')
+
+
+if __name__ == '__main__':
+    main()

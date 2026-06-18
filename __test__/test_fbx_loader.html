@@ -40,9 +40,17 @@ const controls = new OrbitControls(camera, renderer.domElement);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.0));
 const dir = new THREE.DirectionalLight(0xffffff, 1.6); dir.position.set(1, 2, 3); scene.add(dir);
 
-log('THREE.FBXLoader loading out.fbx ...');
+const params = new URLSearchParams(location.search);
+const model = params.get('model');
+if (!model) {
+  log('请通过 URL 参数指定要加载的 FBX 文件，例如：');
+  log('  ?model=../1.fbx');
+  log('  ?model=../output_fbx/1.fbx');
+  throw new Error('缺少 model 参数');
+}
+log('THREE.FBXLoader loading ' + model + ' ...');
 const loader = new FBXLoader();
-loader.load('../out.fbx',
+loader.load(model,
   (obj) => {
     let mesh = 0, geo = 0, mat = 0, verts = 0, tris = 0;
     obj.traverse(n => {

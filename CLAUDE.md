@@ -4,11 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目性质
 
-**3DXML → FBX 转换工具**（非传统软件项目，无构建系统/测试框架/依赖管理）。核心是两个 Blender 脚本 + 一个 HTML 验证页，把 CATIA V5 导出的 3DXML 转为 Three.js FBXLoader 可用的 FBX。`README.md` 含完整用法。
+**3DXML → FBX 转换工具**（非传统软件项目，无构建系统/测试框架/依赖管理）。核心是：两个 Blender 脚本 + 一个 Python wrapper + 一个 HTML 验证页，把 CATIA V5 导出的 3DXML 转为同时兼容 **Three.js FBXLoader** 和 **Unity** 的 FBX。`README.md` 含完整用法。
+
+用户日常入口是 `convert.py`：它自动串行调用 `convert_3dxml_to_fbx.py`（Blender 内导出）和 `diagnose_fbx_units.py --patch`（改写 FBX 头 `UnitScaleFactor=100`，Unity 兼容）。
 
 ## 必须用 Blender 运行（关键约束）
 
-脚本依赖 `bpy`（Blender 内置模块），**普通 `python` 无法运行**。所有脚本都以 headless 方式调用：
+核心转换脚本依赖 `bpy`（Blender 内置模块），**普通 `python` 无法运行**。用户通过 `convert.py` 统一调用，无需手写 Blender 命令。
+
+`convert_3dxml_to_fbx.py` 与 `verify_fbx.py` 以 headless 方式调用：
 
 ```bash
 "E:\Blender\blender.exe" --background --factory-startup --python <script>.py -- <args...>
@@ -18,14 +22,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `--` 之后的参数才传给脚本（脚本内 `sys.argv[argv.index('--')+1:]` 解析）。
 - 本机 Blender 5.0 在 `E:\Blender\blender.exe`（内置 Python 3.11）。
 
+Blender 路径通过 `config.json`（随仓库提交，用户拿到后修改本地路径）或 `BLENDER` 环境变量配置，`convert.py` 会按优先级查找。
+
 常用命令：
 ```bash
-# 转换
-"E:\Blender\blender.exe" --background --factory-startup --python convert_3dxml_to_fbx.py -- lzh.3dxml out.fbx
-# 回读验证
-"E:\Blender\blender.exe" --background --factory-startup --python __test__/verify_fbx.py -- out.fbx
+# 单文件转换（默认输出与输入同名：input.3dxml → input.fbx）
+python convert.py input.3dxml
+# 指定输出
+python convert.py input.3dxml output.fbx
+
+# 批量转换目录下所有 .3dxml
+python convert.py resources/
+# 批量转换并输出到指定目录（目录不存在会自动创建）
+python convert.py resources/ -o output_fbx
+# 递归扫描子目录
+python convert.py resources -r -o output_fbx
+# 批量时单个失败继续
+python convert.py resources/ -o output_fbx --continue-on-error
+
+# 转换 + Blender 回读验证
+python convert.py input.3dxml --verify
+
+# 手动分步（高级用户 / 故障排查）
+"E:\Blender\blender.exe" --background --factory-startup --python convert_3dxml_to_fbx.py -- input.3dxml input.fbx
+python diagnose_fbx_units.py --patch input.fbx input.fbx
+
 # FBXLoader 浏览器实测（需先起本地服务器避免 CORS）
-python -m http.server 8000   # 然后浏览器开 http://127.0.0.1:8000/__test__/test_fbx_loader.html
+python -m http.server 8000
+# 然后浏览器开 http://127.0.0.1:8000/__test__/test_fbx_loader.html?model=../input.fbx
 ```
 
 ## 转换脚本架构（convert_3dxml_to_fbx.py）
@@ -46,7 +70,9 @@ python -m http.server 8000   # 然后浏览器开 http://127.0.0.1:8000/__test__
 
 **③ 每个实例独立 mesh** — `build_object_mesh()` 每次新建 mesh data（只缓存 XML 解析结果）。**不能**让多个 object 共享同一 mesh，否则 Blender FBX 导出器报 material-index 警告、FBXLoader 丢材质。
 
-**④ 单位换算 + scale + 根基准点** — 3DXML 几何/平移是 mm：`parse_rep_file` 顶点与 `relmatrix_to_mat4` 平移都 ÷1000（`MM_TO_M`）。**对齐 CATIA/建模人员 FBX（Unity 友好）的导出配方（三要素缺一不可）**：① `clear_scene()` 末尾设 `scene.unit_settings.scale_length=0.01`（声明场景单位=cm）；② `export_fbx()` 用 `apply_unit_scale=True`；③ `global_scale=1.0`。三者配合抵消 Blender 的 m→cm 根 `scale=100` 补偿，得到根 `scale=(1,1,1)`、顶点与 `Lcl Translation` 均为米制——与建模人员手处理 FBX 逐节点 transform 完全同量级（实测同物体 max|T| 与各节点数值逐一吻合）。**关键：单独调 `apply_unit_scale`/`global_scale` 无法把根 scale 降到 1（实测 4 种组合最小只能 100），必须配 `scale_length=0.01`；且这些 kwarg 不碰几何顶点（4 种组合下顶点 SIZE 恒定）**。漏掉÷1000 会 position×1000；漏掉 `scale_length=0.01` 会根 scale=100 且 translation 同比×100。Unity 单位：FBX 头 `UnitScaleFactor` 由 `diagnose_fbx_units.py --patch` 写 100（Blender 硬编码 1.0，Unity 按 USF/100 缩放视觉尺寸），patch 只改 2 个 double、不动几何/transform。构建后 `world_bbox()`（前置 `bpy.context.view_layer.update()` 刷新 matrix_world）算包围盒中心，上提到根节点（`root_obj.location=C`，顶层子节点 `matrix_basis.translation-=C`），使 `root.position`=模型几何中心、世界坐标不变。调单位配方后用 `__test__/verify_export_scale.py`（Blender 内跑）回归：4 配置 × patch USF=100，回读根 scale + 顶点 SIZE 对照标杆。
+**④ 单位换算 + scale + 根基准点 + 双兼容 patch** — 3DXML 几何/平移是 mm：`parse_rep_file` 顶点与 `relmatrix_to_mat4` 平移都 ÷1000（`MM_TO_M`）。**对齐 CATIA/建模人员 FBX（Unity 友好）的导出配方（三要素缺一不可）**：① `clear_scene()` 末尾设 `scene.unit_settings.scale_length=0.01`（声明场景单位=cm）；② `export_fbx()` 用 `apply_unit_scale=True`；③ `global_scale=1.0`。三者配合抵消 Blender 的 m→cm 根 `scale=100` 补偿，得到根 `scale=(1,1,1)`、顶点与 `Lcl Translation` 均为米制——与建模人员手处理 FBX 逐节点 transform 完全同量级（实测同物体 max|T| 与各节点数值逐一吻合）。**关键：单独调 `apply_unit_scale`/`global_scale` 无法把根 scale 降到 1（实测 4 种组合最小只能 100），必须配 `scale_length=0.01`；且这些 kwarg 不碰几何顶点（4 种组合下顶点 SIZE 恒定）**。漏掉÷1000 会 position×1000；漏掉 `scale_length=0.01` 会根 scale=100 且 translation 同比×100。
+
+**Unity + Three.js 双兼容**：Three.js 直接按几何顶点坐标渲染，忽略 FBX 头 `UnitScaleFactor`；Unity 则按 `UnitScaleFactor/100` 缩放视觉尺寸。Blender 的 FBX 导出器硬编码 `UnitScaleFactor=1.0`，导致 Unity 中模型缩小 100 倍。`convert.py` 导出后自动调用 `diagnose_fbx_units.py --patch` 将 `UnitScaleFactor`/`OriginalUnitScaleFactor` 写为 100，使 Unity 视觉尺寸与 Three.js 一致。patch 只改 2 个 double、不动几何/transform，因此**一个 FBX 即可同时满足 Web 端 Three.js 和 Unity**。构建后 `world_bbox()`（前置 `bpy.context.view_layer.update()` 刷新 matrix_world）算包围盒中心，上提到根节点（`root_obj.location=C`，顶层子节点 `matrix_basis.translation-=C`），使 `root.position`=模型几何中心、世界坐标不变。调单位配方后用 `__test__/verify_export_scale.py`（Blender 内跑，需传入 `.3dxml` 和参考 `.fbx`）回归：4 配置 × patch USF=100，回读根 scale + 顶点 SIZE 对照标杆。
 
 装配树展开用 `obj.matrix_parent_inverse = Identity` + `obj.matrix_basis = relative_matrix`，保证 `matrix_basis` 就是 local→parent 的 RelativeMatrix。
 
@@ -56,12 +82,13 @@ python -m http.server 8000   # 然后浏览器开 http://127.0.0.1:8000/__test__
 
 ## 验证页（test_fbx_loader.html）
 
-用 importmap 从 unpkg CDN 加载 three@0.160 + FBXLoader，渲染 `out.fbx` 并打印 mesh/三角面/包围盒。改 axis/矩阵后用此页确认渲染效果。需本地服务器（非 file://）。
+用 importmap 从 unpkg CDN 加载 three@0.160 + FBXLoader，渲染 FBX 并打印 mesh/三角面/包围盒。必须通过 URL 参数 `?model=../xxx.fbx` 指定加载文件，不传参会提示缺少模型路径。改 axis/矩阵后用此页确认渲染效果。需本地服务器（非 file://）。
 
 ## 数据文件说明
 
-- `lzh.3dxml` — 示例输入（zip）。解压后内部含 `test.3dxml`(产品结构)、`Manifest.xml`(入口)、`*.3DRep`(几何：`NonAscii_6/9` 为空 `<Root/>`、`229009.3DRep` 是主大件)、`CATMaterialRef.3dxml` + `material_*_Rendering.3DRep`(材质库 OSM，**缺到零件的绑定**，故用面内联 RGBA 降级)。脚本运行时自动解压到系统临时目录，无需手动解压。
-- `out.fbx` — 转换输出（可重新生成）。
+- `input.3dxml` — 示例输入（zip）。解压后内部含 `test.3dxml`(产品结构)、`Manifest.xml`(入口)、`*.3DRep`(几何：`NonAscii_6/9` 为空 `<Root/>`、`229009.3DRep` 是主大件)、`CATMaterialRef.3dxml` + `material_*_Rendering.3DRep`(材质库 OSM，**缺到零件的绑定**，故用面内联 RGBA 降级)。脚本运行时自动解压到系统临时目录，无需手动解压。
+- `input.fbx` — 转换输出（可重新生成，`convert.py` 默认输出与输入同名）。
+- `config.json` — Blender 路径配置（随仓库提交，用户拿到后修改本地路径）。
 
 ## 仅支持 XML 型 .3DRep
 

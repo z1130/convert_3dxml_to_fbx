@@ -396,8 +396,13 @@ def main():
         argv = argv[argv.index('--') + 1:]
     else:
         argv = []
-    in_path = os.path.abspath(argv[0] if len(argv) > 0 else 'lzh.3dxml')
-    out_path = os.path.abspath(argv[1] if len(argv) > 1 else 'out.fbx')
+
+    if len(argv) < 2:
+        print("[error] 用法: blender --background --python convert_3dxml_to_fbx.py -- <input.3dxml> <output.fbx>")
+        sys.exit(1)
+
+    in_path = os.path.abspath(argv[0])
+    out_path = os.path.abspath(argv[1])
 
     print(f"[info] blender  = {bpy.app.version_string}")
     print(f"[info] input    = {in_path}")
