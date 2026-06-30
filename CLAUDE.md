@@ -50,7 +50,12 @@ python diagnose_fbx_units.py --patch input.fbx input.fbx
 # FBXLoader 浏览器实测（需先起本地服务器避免 CORS）
 python -m http.server 8000
 # 然后浏览器开 http://127.0.0.1:8000/__test__/test_fbx_loader.html?model=../input.fbx
+
+# 构建分发包（生成 dist/ 发给用户）
+python build.py
 ```
+
+**分发与双模式启动**（改 `convert.py` 必读）：`convert.py` 的 argv 解析兼容 Blender 的 `--`，既可 `python convert.py ...`（系统 Python），也可 `blender --background --factory-startup --python convert.py -- ...`（Blender 自带 Python）启动——用户无需另装 Python。patch 步骤（USF=100）已改为进程内 `from diagnose_fbx_units import patch` 调用（顶部 `sys.path.insert(SCRIPT_DIR)` 保障 Blender 内可 import 同目录模块），**不再是 `sys.executable` 子进程**。**改 `convert.py` 时勿把 patch 改回子进程调用、勿破坏 argv 的 `--` 兼容，否则会破坏「无系统 Python」分发。**
 
 ## 转换脚本架构（convert_3dxml_to_fbx.py）
 

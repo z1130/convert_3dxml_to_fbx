@@ -181,6 +181,8 @@ axis_up='Y',         # 可选: 'Y' / 'Z'   ← CAD/3DXML 常见为 Y-up 或 Z-up
 | `config.json` | Blender 路径配置（随仓库提交，用户拿到后修改本地路径） |
 | `convert_3dxml_to_fbx.py` | **主转换脚本**（被 wrapper 调用） |
 | `diagnose_fbx_units.py` | FBX 单位元数据读写/修补（`--patch` 写 `UnitScaleFactor=100`，Unity 兼容） |
+| `build.py` | 一键构建分发包到 `dist/`（发给用户） |
+| `SETUP.md` | 面向零环境用户的安装使用文档 |
 | **`__test__/`（验证 / 对比）** | |
 | `verify_fbx.py` | Blender 回读验证脚本 |
 | `verify_export_scale.py` | 导出单位配置回归（Blender 内跑，需传入 `.3dxml` 和参考 `.fbx`） |
@@ -193,7 +195,39 @@ axis_up='Y',         # 可选: 'Y' / 'Z'   ← CAD/3DXML 常见为 Y-up 或 Z-up
 
 ---
 
-## 十、已知限制
+## 十、分发给他人使用
+
+### 1. 构建分发包
+
+```bash
+python build.py
+```
+
+生成 `dist/`，只含用户运行所需文件（排除示例数据与开发产物），并自动写入空路径版 `config.json`。**直接把整个文件夹发给用户即可，无需打包成 zip。**
+
+分发包内容：
+
+| 文件 | 作用 |
+|---|---|
+| `convert.py` / `convert_3dxml_to_fbx.py` / `diagnose_fbx_units.py` | 核心转换 |
+| `__test__/verify_fbx.py` | `--verify` 依赖 |
+| `config.json` | `blender_path` 留空，走自动探测 |
+| `README.md` / `SETUP.md` | 完整文档 / 用户向安装文档 |
+
+### 2. 用户需要装什么
+
+**只需装 Blender（4.0 ~ 5.0），默认路径安装即可免配置。** Python 非必需——`convert.py` 支持双模式启动：
+
+| 用户情况 | 命令 |
+|---|---|
+| 装了 Python（命令更短） | `python convert.py input.3dxml` |
+| 只有 Blender | `"C:/Program Files/Blender Foundation/Blender 5.0/blender.exe" --background --factory-startup --python convert.py -- input.3dxml` |
+
+详见分发包内的 `SETUP.md`。脚本更新后再次执行 `python build.py` 即可刷新分发包（会先清空旧目录）。
+
+---
+
+## 十一、已知限制
 
 1. **仅支持 XML 型 `.3DRep`**：二进制型 `.3DRep`（CATIA CGR/CGM 内核变体）为达索私有格式，无开源解析方案。
 2. **材质库无法精确绑定**：`material_47/52/59` 等 OSM 物理材质定义存在，但 3DXML 中缺到具体零件的绑定节点 → 用面内联纯色降级（颜色准确，丢失反射率/折射率等物理参数）。

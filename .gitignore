@@ -1,6 +1,7 @@
 .vscode
 __pycache__/
 resources/
+dist/
 *.fbx
 *.3dxml
 *.zip

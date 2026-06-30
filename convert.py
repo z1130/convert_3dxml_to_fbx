@@ -33,8 +33,13 @@ except (AttributeError, ValueError):
 SCRIPT_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = SCRIPT_DIR / "config.json"
 CONVERT_SCRIPT = SCRIPT_DIR / "convert_3dxml_to_fbx.py"
-DIAGNOSE_SCRIPT = SCRIPT_DIR / "diagnose_fbx_units.py"
 VERIFY_SCRIPT = SCRIPT_DIR / "__test__" / "verify_fbx.py"
+
+# 把脚本目录加入 sys.path：Blender 以 `--python convert.py` 加载本脚本时，
+# 脚本所在目录默认不在 sys.path 中，需显式加入才能 import 同目录模块。
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from diagnose_fbx_units import patch as patch_fbx  # noqa: E402
 
 DEFAULT_BLENDER_PATHS = [
     r"E:\Blender\blender.exe",
@@ -181,18 +186,11 @@ def convert_one(in_path, out_path, blender, no_patch=False, verify=False):
             description=f"Blender 导出 {tmp_fbx.name}",
         )
 
-        # 2. patch USF=100（默认启用）
+        # 2. patch USF=100（默认启用）—— 进程内调用 diagnose_fbx_units.patch，
+        #    无需系统 Python：用的是启动本脚本的解释器（系统 Python 或 Blender 皆可）。
         if not no_patch:
-            run(
-                [
-                    sys.executable,
-                    DIAGNOSE_SCRIPT,
-                    "--patch",
-                    tmp_fbx,
-                    out_path,
-                ],
-                description=f"patch UnitScaleFactor → {out_path.name}",
-            )
+            print(f"[run] patch UnitScaleFactor → {out_path.name}")
+            patch_fbx(str(tmp_fbx), str(out_path))
         else:
             shutil.move(str(tmp_fbx), str(out_path))
             print(f"[info] 已跳过 patch，直接复制到 {out_path}")
@@ -268,7 +266,13 @@ def main():
         action="store_true",
         help="批量模式下单个文件失败后继续处理其他文件",
     )
-    args = parser.parse_args()
+    # 兼容两种启动：系统 Python（`python convert.py ...`）与 Blender
+    # （`blender --python convert.py -- ...`）。后者 sys.argv 含 Blender 自身参数，
+    # 需取 '--' 之后的参数。
+    raw_argv = sys.argv
+    args = parser.parse_args(
+        raw_argv[raw_argv.index('--') + 1:] if '--' in raw_argv else raw_argv[1:]
+    )
 
     input_path = Path(args.input).resolve()
     input_files = collect_inputs(input_path, recursive=args.recursive)
