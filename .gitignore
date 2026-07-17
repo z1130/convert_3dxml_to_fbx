@@ -2,6 +2,8 @@
 __pycache__/
 resources/
 dist/
+dist.tar
+build/
 vendor/
 *.fbx
 *.3dxml

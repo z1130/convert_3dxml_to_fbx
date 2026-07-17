@@ -1,111 +1,153 @@
-# 3DXML → FBX 转换工具 — 安装与使用
+# 3DXML → FBX 转换工具 — 使用手册
 
-## 这个工具做什么
+把 CATIA V5 导出的 **.3dxml** 文件拖进网页，一键转成 **.fbx**（Three.js 和 Unity 都能直接用，尺寸已调好）。
 
-把 CATIA V5 导出的 **3DXML** 文件转成 **FBX**。同一个 FBX 同时兼容：
-
-- **Three.js**（Web 端，FBXLoader 直接加载）
-- **Unity**（视觉尺寸与 Three.js 一致，已自动处理 UnitScaleFactor）
+**你不需要安装任何东西**：不用装 Python、不用装 Blender、不用联网。Windows 10 或更新版本即可。
 
 ---
 
-## 你需要装什么
+## 一、快速上手（3 步）
 
-**只需要 Python 3.13 + bpy 包。** 不需要安装 Blender。
-
-### 第一步：安装 Python 3.13
-
-bpy 官方 wheel 仅支持 Python 3.13（其他版本无法加载，会报 DLL load failed）。
-
-1. 下载：<https://www.python.org/downloads/release/python-3130/>
-2. 安装时勾选 “Add python.exe to PATH”。
-3. **强烈建议用默认路径安装**（Windows 下即 `C:\Users\<用户名>\AppData\Local\Programs\Python\Python313\`）。默认路径装好后**无需任何配置**，工具会自动找到。
-
-### 第二步：安装 bpy（一次性）
-
-打开命令行（在工具文件夹地址栏输入 `cmd` 回车），执行：
-
-```bash
-"C:/Users/<用户名>/AppData/Local/Programs/Python/Python313/python.exe" -m pip install bpy --target=./vendor
+```
+① 解压压缩包到任意目录（建议纯英文路径，如 D:\converter\）
+② 双击 converter.exe —— 浏览器会自动打开转换页面
+③ 把 .3dxml 文件（或整个文件夹）拖进页面 → 自动转换 → 点「下载 FBX」
 ```
 
-- 把 `<用户名>` 换成你的实际用户名。
-- `--target=./vendor` 把 bpy 装到工具目录下的 `vendor/` 子目录，**不污染系统环境**。
-- 下载量约 350MB，请耐心等待。
-- 装好后工具目录下会出现 `vendor/` 文件夹。
+就这三步。用完直接**关掉黑色控制台窗口**即可（服务停止，临时文件自动删除，电脑不留痕）。
 
-### 第三步：（仅当未用默认路径）告诉工具 Python 3.13 在哪
-
-如果 Python 3.13 装在非默认路径，二选一即可：
-
-- **改 `config.json`（推荐）**：用记事本打开本目录下的 `config.json`，把 `python_path` 填成你的 `python.exe` 完整路径，例如：
-  ```json
-  {
-    "python_path": "D:/Python313/python.exe"
-  }
-  ```
-- **设环境变量**：新增系统环境变量 `PYTHON313`，值设为 `python.exe` 完整路径。
-
-### Linux 用户
-
-```bash
-# 1. 装 Python 3.13（Ubuntu/Debian 示例；其他发行版用对应包管理器）
-sudo apt install python3.13 python3-pip
-
-# 2. 装 bpy 到项目 ./vendor（pip 会自动拉 manylinux wheel）
-python3.13 -m pip install bpy --target=./vendor
-
-# 3. 转换（python3.13 通常已在 PATH，无需改 config.json）
-python3.13 convert.py input.3dxml
-```
-
-> 若 `import bpy` 报缺失 `.so`（如 `libGL.so`、`libX11.so`），bpy 依赖系统图形库，执行：
-> `sudo apt install libgl1 libxi6 libxxf86vm1 libxfixes3 libxrender1`
+> 💡 首次运行如果 Windows 防火墙弹窗，点「允许」。浏览器没自动打开时，看控制台窗口里的地址（形如 `http://127.0.0.1:端口号/`），手动复制到浏览器打开。
 
 ---
 
-## 怎么用
+## 二、页面怎么用
 
-打开命令行（在工具文件夹的地址栏输入 `cmd` 回车），然后执行：
-
-```bash
-python convert.py input.3dxml
-```
-
-> 即使 `python` 默认不是 3.13，工具也会自动找到 3.13 并切换，无需手动指定解释器。
-
-### 常用参数
-
-| 用途 | 命令 |
+| 界面元素 | 作用 |
 |---|---|
-| 单文件转换（默认输出同名 `input.fbx`） | `python convert.py input.3dxml` |
-| 指定输出文件名 | `python convert.py input.3dxml output.fbx` |
-| 批量转换整个目录 | `python convert.py 某目录/ -o 输出目录/` |
-| 递归扫描子目录 | `python convert.py 某目录/ -r -o 输出目录/` |
-| 批量时单个失败也继续 | 末尾加 `--continue-on-error` |
-| 转换后自检（回读验证） | 末尾加 `--verify` |
+| 拖拽区 / 「选择文件」/「选择文件夹」 | 添加要转换的 .3dxml（文件夹会扫描全部子目录，可一次多个） |
+| 任务列表 | 每个文件一张卡片，实时显示：排队中 / 转换中 / 成功 / 失败 |
+| 「下载 FBX」 | 转换成功后，下载单个结果 |
+| 「3D 预览」 | 页面内直接查看模型（鼠标左键旋转、滚轮缩放、右键平移；可切线框、重置视角） |
+| 「全部下载（ZIP）」 | 把所有成功的结果打包成一个 zip（保持原文件夹目录结构） |
+| 「清空列表」 | 清空任务列表（需确认） |
+| 「重试」 | 转换失败后重新转换 |
+| 底部状态栏 | 绿点 = 服务正常运行中 |
 
 ---
 
-## 常见问题
+## 三、命令行用法（可选，适合批处理/脚本）
 
-**Q: 报错「找不到 Python 3.13」。**
-A: 你没装 Python 3.13，或装在非默认路径且没配 `config.json`。回到上面“第一步 / 第三步”。
+`converter.exe` 同时也是命令行工具，在 cmd / PowerShell 里：
 
-**Q: 报错「未找到 bpy 安装目录: .../vendor」。**
-A: 你没执行第二步安装 bpy。在工具目录下跑 `"<Python313>/python.exe" -m pip install bpy --target=./vendor`。
+```bash
+# 单文件转换（输出同名 input.fbx）
+converter.exe input.3dxml
 
-**Q: 报错「加载 bpy 失败 ... DLL load failed」。**
-A: 当前 Python 版本不对。bpy wheel 仅支持 Python 3.13，确认装的是 3.13。
+# 指定输出文件名
+converter.exe input.3dxml output.fbx
 
-**Q: 报错「输入文件不是 .3dxml」。**
-A: 文件后缀不对。本工具只接受 `.3dxml` 后缀的文件。
+# 批量转换整个文件夹（-r 递归子目录）
+converter.exe 某文件夹/ -r -o 输出文件夹/
 
-**Q: 转换过程中报了一堆错，怎么定位？**
-A: 日志里 `[error]` 开头的就是原因。常见是：3DXML 文件损坏；或该文件是二进制 CGR/CGM 格式（部分 CATIA 配置导出二进制，**本工具不支持**，只支持 XML 型）。
+# 批量时某个失败也继续
+converter.exe 某文件夹/ -o 输出文件夹/ --continue-on-error
+```
 
-**Q: 转出来的 FBX 在 Unity 里太小或太大。**
-A: 工具默认已把 `UnitScaleFactor` 设为 100（Unity 友好）。确认你没加 `--no-patch` 参数（加了等于只给 Three.js 用，不兼容 Unity）。
+---
 
-**Q: 想看完整技术文档。**
-A: 读本目录下的 `README.md`。
+## 四、多人共用（局域网）
+
+只需在**一台**电脑（Windows 10+）上运行，其他人用浏览器访问：
+
+```bash
+converter.exe serve --host 0.0.0.0 --port 8000
+```
+
+然后团队任何电脑（包括 Win7、Mac）浏览器打开 `http://<这台电脑的IP>:8000/` 即可使用。多人同时转换会自动排队。
+
+---
+
+## 五、部署到服务器（IT / 管理员）
+
+### 方案 A：Windows 服务器（最简单）
+
+分发包解压到服务器，执行：
+
+```bash
+converter.exe serve --host 0.0.0.0 --port 8000 --no-browser
+```
+
+- 防火墙放行 8000 端口；
+- 常驻运行：「任务计划程序」设开机启动 + 失败重启，或用 NSSM 注册成 Windows 服务。
+
+### 方案 B：Linux 服务器
+
+```bash
+git clone https://github.com/z1130/convert_3dxml_to_fbx.git && cd convert_3dxml_to_fbx
+sudo apt install python3.13 python3-pip
+python3.13 -m pip install bpy flask --target=./vendor
+sudo apt install libgl1 libxi6 libxxf86vm1 libxfixes3 libxrender1   # bpy 无头运行依赖
+python3.13 app.py serve --host 0.0.0.0 --port 8000 --no-browser
+```
+
+systemd 常驻（`/etc/systemd/system/converter.service`）：
+
+```ini
+[Unit]
+Description=3DXML to FBX Converter
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/convert_3dxml_to_fbx
+ExecStart=/usr/bin/python3.13 app.py serve --host 0.0.0.0 --port 8000 --no-browser
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 部署注意点
+
+1. **文件安全**：上传的 .3dxml 和产物 .fbx 都在服务器临时目录，**服务停止即自动删除**，服务器不保留用户文件；
+2. **并发**：转换内部串行排队（bpy 限制），多人同时使用无需配置；
+3. **HTTPS/域名**：需要时前置 nginx（`proxy_pass http://127.0.0.1:8000`，大文件上传设 `client_max_body_size 2g`）；
+4. **公网暴露必须加鉴权**：服务本身无登录，请在 nginx 层加 basic auth 或 IP 白名单。
+
+---
+
+## 六、常见问题
+
+**Q：双击 exe 没反应 / 浏览器没打开？**
+A：看黑色控制台窗口里的地址（`http://127.0.0.1:.../`），手动复制到浏览器。防火墙弹窗选「允许」。
+
+**Q：Win7 能用吗？**
+A：不能直接运行（需要 Windows 10+）。Win7 电脑可以用「四、多人共用」方式，浏览器访问别的机器。
+
+**Q：转换失败提示「File is not a zip file」或解析错误？**
+A：这个文件损坏了，或者它是二进制格式的 3DXML（CATIA 另一种导出配置）。本工具只支持 XML 型 3DXML。
+
+**Q：转出来的 FBX 在 Unity 里尺寸不对？**
+A：不会的。工具已自动做 Unity 兼容处理，Three.js 和 Unity 里视觉尺寸一致。
+
+**Q：上传的文件会泄露吗？**
+A：不会。文件只存在本机（或服务端）临时目录，服务关闭即删除，不联网、不上传到任何外部服务器。
+
+**Q：页面里转换大文件卡住不动？**
+A：大文件转换需要几十秒属正常（进度条是动画而非真实百分比）。耐心等待即可，转换成功会有提示。
+
+---
+
+## 七、附录：从源码构建分发包（仅打包者）
+
+终端用户请忽略本节。构建机需要：Windows 10+、Python 3.13、MSVC（VS 2022 / Build Tools）。
+
+```bash
+# 1. 装依赖到 ./vendor（bpy 约 350MB）
+python313 -m pip install bpy flask nuitka --target=./vendor
+
+# 2. 一键构建（首次约 10–30 分钟，产出 dist/）
+python tools/build.py
+```
+
+产出 `dist/`（约 1GB，自包含、无源码）压缩即可分发。技术细节见仓库 `README.md`。

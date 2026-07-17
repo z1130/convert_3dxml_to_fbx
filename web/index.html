@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3DXML → FBX Converter</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%2322D3EE'/%3E%3Cpath d='M18 8.5l-6-3.3-6 3.3v7l6 3.3 6-3.3z' fill='none' stroke='%2304121a' stroke-width='1.6'/%3E%3Cpath d='M6 8.5l6 3.3 6-3.3M12 11.8v7' fill='none' stroke='%2304121a' stroke-width='1.6'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/app.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/three.module.js",
+    "three/addons/": "/vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+
+<!-- 顶栏 -->
+<header class="header">
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/>
+    </svg>
+  </div>
+  <div class="titles">
+    <span class="title">3DXML → FBX Converter</span>
+    <span class="subtitle">CATIA V5 3DXML 转 Three.js / Unity 兼容 FBX</span>
+  </div>
+  <span class="spacer"></span>
+  <button class="help-btn" id="helpBtn" title="使用说明">?</button>
+</header>
+
+<div class="help-popover" id="helpPopover">
+  <b>使用说明</b><br>
+  1. 拖入 <code>.3dxml</code> 文件或整个文件夹，自动开始转换；<br>
+  2. 转换成功后单个下载，或「全部下载（ZIP）」打包；<br>
+  3. 点击「3D 预览」在页面内检查模型（可旋转/缩放）；<br>
+  4. 输出 FBX 兼容 Three.js FBXLoader 与 Unity，单位为米。
+</div>
+
+<!-- 主区域 -->
+<main class="main">
+  <div class="container">
+
+    <!-- 上传拖拽区 -->
+    <div class="dropzone" id="dropzone">
+      <div class="dz-main" id="dzText">拖拽 .3dxml 文件或文件夹到此处</div>
+      <div class="dz-btns">
+        <button class="btn btn-sm" id="btnPickFile" data-pick>
+          <img class="ic" src="/assets/icons/fileplus.svg" alt="">选择文件
+        </button>
+        <button class="btn btn-sm" id="btnPickFolder" data-pick>
+          <img class="ic" src="/assets/icons/folderplus.svg" alt="">选择文件夹
+        </button>
+      </div>
+      <div class="dz-hint">文件夹将扫描全部子目录，仅限 .3dxml 格式</div>
+    </div>
+    <input type="file" id="fileInput" accept=".3dxml" multiple hidden>
+    <input type="file" id="folderInput" webkitdirectory hidden>
+
+    <!-- 任务工具栏 -->
+    <div class="taskbar">
+      <div class="stats" id="taskStats"></div>
+      <div class="actions">
+        <button class="btn btn-primary" id="btnDownloadAll" disabled>
+          <img class="ic" src="/assets/icons/download.svg" alt="">全部下载（ZIP）
+        </button>
+        <button class="btn btn-danger-outline" id="btnClear" disabled>
+          <img class="ic" src="/assets/icons/trash2.svg" alt="">清空列表
+        </button>
+      </div>
+    </div>
+
+    <!-- 空态 -->
+    <div class="empty" id="emptyState">
+      <img class="ic" src="/assets/icons/file.svg" alt="">
+      <div>暂无任务，请先添加 .3dxml 文件或文件夹</div>
+    </div>
+
+    <!-- 任务列表 -->
+    <div id="taskList" class="task-list"></div>
+
+  </div>
+</main>
+
+<!-- 预览抽屉 -->
+<aside class="drawer" id="drawer">
+  <div class="drawer-bar">
+    <span class="name" id="drawerTitle">—</span>
+    <button class="btn btn-sm" id="btnResetView">重置视角</button>
+    <label class="seg">
+      <input type="checkbox" id="wireframeToggle"> 线框
+    </label>
+    <button class="btn btn-icon" id="btnDrawerClose" title="关闭">
+      <img class="ic" src="/assets/icons/x.svg" alt="">
+    </button>
+  </div>
+  <div class="drawer-view" id="drawerViewport">
+    <div class="drawer-loading" id="drawerLoading" style="display:none">
+      <img class="ic" src="/assets/icons/loader.svg" alt="">
+      模型加载中…
+    </div>
+  </div>
+  <div class="drawer-info" id="drawerInfo"></div>
+</aside>
+
+<!-- 底部状态栏 -->
+<footer class="footer">
+  <span class="dot"></span>
+  <span id="hostInfo">本地服务运行中</span>
+</footer>
+
+<!-- Toast -->
+<div class="toasts" id="toasts"></div>
+
+<!-- 确认对话框 -->
+<div class="modal-mask" id="confirmModal">
+  <div class="modal">
+    <div class="m-title">确认操作</div>
+    <div class="m-text" id="confirmText"></div>
+    <div class="m-btns">
+      <button class="btn" id="confirmCancel">取消</button>
+      <button class="btn btn-danger-outline" id="confirmOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

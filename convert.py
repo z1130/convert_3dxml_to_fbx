@@ -28,10 +28,11 @@ import traceback
 from pathlib import Path
 
 # Windows 控制台默认编码可能不是 UTF-8，强制标准输出/错误使用 UTF-8，
-# 避免中文提示显示为乱码。
+# 避免中文提示显示为乱码。已包装过则跳过（重复包装会被 GC 关闭底层流）。
 try:
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    if (sys.stdout.encoding or "").lower() != "utf-8":
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 except (AttributeError, ValueError):
     pass
 
@@ -39,9 +40,16 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = SCRIPT_DIR / "config.json"
 PIP_DIR = SCRIPT_DIR / "vendor"
 
+# Nuitka 打包（冻结）状态：解释器与 bpy 均内置，跳过版本切换与 vendor 注入。
+# Nuitka 编译后 sys.frozen 为 True 或模块内存在 __compiled__ 全局。
+FROZEN = getattr(sys, "frozen", False) or "__compiled__" in globals()
+
 # 由 setup_bpy_runtime() 填充：进程内调用的转换/验证模块
 _convert_module = None
 _verify_module = None
+
+# convert_one 最近一次失败的错误信息（供 server 模式取回展示，CLI 不使用）
+LAST_ERROR = ""
 
 
 def load_config():
@@ -101,7 +109,7 @@ def find_python313():
 
 def ensure_python313():
     """bpy wheel 仅 cp313。若当前解释器不是 3.13，找到 3.13 并 execv 重启自身。"""
-    if sys.version_info[:2] == (3, 13):
+    if FROZEN or sys.version_info[:2] == (3, 13):
         return
     py = find_python313()
     if not py:
@@ -117,18 +125,23 @@ def ensure_python313():
 
 
 def setup_bpy_runtime():
-    """加载 ./vendor 中的 bpy 及转换/验证模块。必须在 ensure_python313 之后调用。"""
+    """加载 bpy 及转换/验证模块。必须在 ensure_python313 之后调用。
+
+    开发模式：bpy 位于 ./vendor，需注入 sys.path。
+    冻结模式（Nuitka）：bpy 已编进产物，直接 import 即可。
+    """
     global _convert_module, _verify_module
 
-    if not PIP_DIR.is_dir():
-        print(f"[error] 未找到 bpy 安装目录: {PIP_DIR}")
-        print("        请先在项目根目录安装 bpy：")
-        print(f'          "<Python313>/python.exe" -m pip install bpy --target="{PIP_DIR.name}"')
-        sys.exit(1)
+    if not FROZEN:
+        if not PIP_DIR.is_dir():
+            print(f"[error] 未找到 bpy 安装目录: {PIP_DIR}")
+            print("        请先在项目根目录安装 bpy：")
+            print(f'          "<Python313>/python.exe" -m pip install bpy --target="{PIP_DIR.name}"')
+            sys.exit(1)
 
-    pip_str = str(PIP_DIR)
-    if pip_str not in sys.path:
-        sys.path.insert(0, pip_str)
+        pip_str = str(PIP_DIR)
+        if pip_str not in sys.path:
+            sys.path.insert(0, pip_str)
     try:
         import bpy as _bpy
     except ImportError as e:
@@ -182,6 +195,8 @@ def resolve_output_for_batch(input_file, output_dir):
 
 def convert_one(in_path, out_path, no_patch=False, verify=False):
     """转换单个文件。成功返回 True，失败返回 False（不抛出，便于批量继续）。"""
+    global LAST_ERROR
+    LAST_ERROR = ""
     print(f"\n[info] input   = {in_path}")
     print(f"[info] output  = {out_path}")
 
@@ -214,6 +229,7 @@ def convert_one(in_path, out_path, no_patch=False, verify=False):
             _verify_module.verify(str(out_path))
         return True
     except Exception as e:
+        LAST_ERROR = str(e)
         print(f"[error] 转换失败: {in_path}: {e}")
         traceback.print_exc()
         return False

@@ -4,9 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目性质
 
-**3DXML → FBX 转换工具**（非传统软件项目，无构建系统/测试框架/依赖管理）。核心是：两个 Blender 脚本 + 一个 Python wrapper + 一个 HTML 验证页，把 CATIA V5 导出的 3DXML 转为同时兼容 **Three.js FBXLoader** 和 **Unity** 的 FBX。`README.md` 含完整用法。
+**3DXML → FBX 转换工具**（非传统软件项目，无构建系统/测试框架/依赖管理）。核心是：两个 Blender 脚本 + 一个 Python wrapper + Web 界面，把 CATIA V5 导出的 3DXML 转为同时兼容 **Three.js FBXLoader** 和 **Unity** 的 FBX。`README.md` 含完整用法。
 
-用户日常入口是 `convert.py`：它自动串行**进程内**调用 `convert_3dxml_to_fbx.convert()`（导出）和 `diagnose_fbx_units.patch`（改写 FBX 头 `UnitScaleFactor=100`，Unity 兼容）。
+用户日常入口是 `app.py`（双模式）：无参数 = Web 界面模式（本地 Flask 服务 + 自动开浏览器）；`serve` = 显式服务模式；其余参数 = CLI 模式（等价于 `convert.py`）。CLI 自动串行**进程内**调用 `convert_3dxml_to_fbx.convert()`（导出）和 `diagnose_fbx_units.patch`（改写 FBX 头 `UnitScaleFactor=100`，Unity 兼容）。
+
+## 分发架构（Nuitka 编译，改动前必读）
+
+`python tools/build.py` 用 **Nuitka `--standalone`** 把整个工具编译成自包含 `dist/`（~1GB，含 Python 3.13 运行时 + bpy + flask + `web/` 界面，**无 .py 源码**），用户 Windows 10+ 解压双击 `converter.exe` 即用。要点：
+
+- **入口 `app.py`**：`converter.exe`（无参）→ Web 服务；`converter.exe serve --host 0.0.0.0` → 局域网服务（Win7 客户端走浏览器访问）；`converter.exe <文件/参数>` → CLI。
+- **`server.py`**：Flask 同源托管 `web/index.html` 与 `/convert`（multipart 上传）、`/file/<id>`、`/zip`、`/health`，**无跨域问题**（页面与接口同源）；转换经全局 `CONVERT_LOCK` **串行**（bpy 非线程安全）；会话文件写临时目录、进程退出清理。
+- **`convert.py` 的 `FROZEN` 守卫**：Nuitka 冻结状态（`sys.frozen` / `__compiled__`）下跳过 `ensure_python313()` 与 `./vendor` sys.path 注入——解释器与 bpy 已编译进产物。**不要移除该守卫，否则 exe 会在用户机器上找 Python 3.13。**
+- **stdout 双包装陷阱**：`app.py`/`convert.py`/`server.py` 都做 stdout UTF-8 包装，必须先查 `sys.stdout.encoding == 'utf-8'` 再包——重复包装会让旧包装器被 GC 时关闭底层流（`ValueError: I/O operation on closed file`）。
+- **bpy 打包**：`--include-package=bpy --include-package-data=bpy`（收 `__init__.pyd` + 全部 DLL + `5.1/` 数据），外加 `--include-package=numpy flask`；`web/` 经 `--include-data-dir` 纯拷贝——**改 `web/` 内容不用重新编译，直接覆盖 `dist/web/` 即可**；改 Python 代码才需重跑 build.py（首次 10–30 分钟，有缓存后更快）。构建机需 MSVC（VS 2022/Build Tools）。
+- **Win7 不支持**：Python 3.13 + bpy 5.x 要求 Win10+，exe 无法在 Win7 运行；老系统用 `serve --host 0.0.0.0` 局域网模式浏览器访问。
+
+## Web 界面（web/）
+
+深色科技风单页：`index.html` + `app.css` + `app.js`（任务队列/拖拽上传/单个+文件夹，逐个串行 POST `/convert`）+ `preview.js`（Three.js FBX 预览抽屉，按需 `import()`）。three@**0.169** 全套依赖已本地化到 `web/vendor/three/`（importmap：`three` + `three/addons/`），exe 离线可用。**视觉按 Pixso 设计稿 DSL 像素级还原**：图标用设计稿导出的 SVG（`web/assets/icons/`，颜色已按状态烘焙，直接 `<img>` 引用）；文件名/路径/尺寸用打包的 JetBrains Mono（`web/assets/fonts/`，@font-face）；中文字体栈 `"PingFang SC", "Microsoft YaHei"`。禁紫色/渐变/毛玻璃/发光，强调青 #22D3EE。改界面数值（间距/字号/圆角）前先查设计稿 DSL 原始值，勿凭感觉调。
 
 ## 基于 pip 版 bpy 运行（关键约束）
 
@@ -22,7 +37,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 常用命令：
 ```bash
-# 单文件转换（默认输出与输入同名：input.3dxml → input.fbx）
+# Web 界面模式（开发）：自动选端口并开浏览器
+python app.py
+python app.py serve --port 8765 --no-browser
+
+# CLI 单文件转换（默认输出与输入同名：input.3dxml → input.fbx）
 python convert.py input.3dxml
 # 指定输出
 python convert.py input.3dxml output.fbx
@@ -47,7 +66,7 @@ python converter/diagnose_fbx_units.py --patch input.fbx input.fbx
 python -m http.server 8000
 # 然后浏览器开 http://127.0.0.1:8000/tests/test_fbx_loader.html?model=../input.fbx
 
-# 构建分发包（生成 dist/ 发给用户）
+# 构建分发包（Nuitka 编译，生成自包含 dist/ 发给用户）
 python tools/build.py
 ```
 
