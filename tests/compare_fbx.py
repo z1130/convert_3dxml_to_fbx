@@ -25,21 +25,21 @@ def read_prop(data, pos):
     if t == 'D': return struct.unpack('<d', data[pos:pos + 8])[0], pos + 8
     if t == 'L': return struct.unpack('<q', data[pos:pos + 8])[0], pos + 8
     if t in ('f', 'i', 'd', 'l', 'b'):
+        # FBX 数组属性字段顺序：元素个数 → 编码 → 压缩后长度
+        alen = u32(data, pos); pos += 4
         enc = u32(data, pos); pos += 4
-        stored = u32(data, pos); pos += 4
-        decomp = u32(data, pos); pos += 4
+        clen = u32(data, pos); pos += 4
         size = {'f': 4, 'i': 4, 'd': 8, 'l': 8, 'b': 1}[t]
-        blob = data[pos:pos + stored]; pos += stored
         if enc == 0:
-            raw = blob
+            raw = data[pos:pos + alen * size]; pos += alen * size
         else:
+            blob = data[pos:pos + clen]; pos += clen
             try:
                 raw = zlib.decompress(blob)
             except zlib.error:
                 raw = zlib.decompress(blob, -15)        # raw deflate fallback
-        count = decomp // size
-        fmt = {'f': '<f', 'i': '<i', 'd': '<d', 'l': '<q', 'b': '<B'}[t]
-        vals = list(struct.unpack(fmt * count, raw)) if count else []
+        code = {'f': 'f', 'i': 'i', 'd': 'd', 'l': 'q', 'b': 'B'}[t]
+        vals = list(struct.unpack(f'<{alen}{code}', raw)) if alen else []
         return ('array', vals), pos
     raise ValueError(f'bad prop type {t!r} at {pos}')
 
@@ -106,9 +106,9 @@ def analyze(path):
         p70 = p70[0] if p70 else []
         tr = sc = None
         for pn in p70:
-            if pn[0] == 'P' and len(pn[1]) >= 7 and pn[1][0] in ('LclTranslation', 'LclScaling'):
+            if pn[0] == 'P' and len(pn[1]) >= 7 and pn[1][0] in ('Lcl Translation', 'Lcl Scaling'):
                 v = (pn[1][4], pn[1][5], pn[1][6])
-                if pn[1][0] == 'LclTranslation': tr = v
+                if pn[1][0] == 'Lcl Translation': tr = v
                 else: sc = v
         scs = f'({sc[0]:.4f},{sc[1]:.4f},{sc[2]:.4f})' if sc else None
         trs = f'({tr[0]:.3f},{tr[1]:.3f},{tr[2]:.3f})' if tr else None

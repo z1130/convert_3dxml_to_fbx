@@ -26,13 +26,13 @@ bpy 官方 wheel 仅支持 Python 3.13（其他版本无法加载，会报 DLL l
 打开命令行（在工具文件夹地址栏输入 `cmd` 回车），执行：
 
 ```bash
-"C:/Users/<用户名>/AppData/Local/Programs/Python/Python313/python.exe" -m pip install bpy --target=./pip
+"C:/Users/<用户名>/AppData/Local/Programs/Python/Python313/python.exe" -m pip install bpy --target=./vendor
 ```
 
 - 把 `<用户名>` 换成你的实际用户名。
-- `--target=./pip` 把 bpy 装到工具目录下的 `pip/` 子目录，**不污染系统环境**。
+- `--target=./vendor` 把 bpy 装到工具目录下的 `vendor/` 子目录，**不污染系统环境**。
 - 下载量约 350MB，请耐心等待。
-- 装好后工具目录下会出现 `pip/` 文件夹。
+- 装好后工具目录下会出现 `vendor/` 文件夹。
 
 ### 第三步：（仅当未用默认路径）告诉工具 Python 3.13 在哪
 
@@ -52,8 +52,8 @@ bpy 官方 wheel 仅支持 Python 3.13（其他版本无法加载，会报 DLL l
 # 1. 装 Python 3.13（Ubuntu/Debian 示例；其他发行版用对应包管理器）
 sudo apt install python3.13 python3-pip
 
-# 2. 装 bpy 到项目 ./pip（pip 会自动拉 manylinux wheel）
-python3.13 -m pip install bpy --target=./pip
+# 2. 装 bpy 到项目 ./vendor（pip 会自动拉 manylinux wheel）
+python3.13 -m pip install bpy --target=./vendor
 
 # 3. 转换（python3.13 通常已在 PATH，无需改 config.json）
 python3.13 convert.py input.3dxml
@@ -92,8 +92,8 @@ python convert.py input.3dxml
 **Q: 报错「找不到 Python 3.13」。**
 A: 你没装 Python 3.13，或装在非默认路径且没配 `config.json`。回到上面“第一步 / 第三步”。
 
-**Q: 报错「未找到 bpy 安装目录: .../pip」。**
-A: 你没执行第二步安装 bpy。在工具目录下跑 `"<Python313>/python.exe" -m pip install bpy --target=./pip`。
+**Q: 报错「未找到 bpy 安装目录: .../vendor」。**
+A: 你没执行第二步安装 bpy。在工具目录下跑 `"<Python313>/python.exe" -m pip install bpy --target=./vendor`。
 
 **Q: 报错「加载 bpy 失败 ... DLL load failed」。**
 A: 当前 Python 版本不对。bpy wheel 仅支持 Python 3.13，确认装的是 3.13。

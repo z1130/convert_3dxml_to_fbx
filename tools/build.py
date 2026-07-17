@@ -5,11 +5,11 @@
 config.json 生成空路径版（解绑作者本机路径，让用户机器上的 find_python313
 走自动探测：环境变量 → PATH → 默认安装路径）。
 
-注意：./pip（bpy 依赖，350MB+）不打包进 dist，用户需自行安装 bpy：
-  "<Python313>/python.exe" -m pip install bpy --target=./pip
+注意：./vendor（bpy 依赖，350MB+）不打包进 dist，用户需自行安装 bpy：
+  "<Python313>/python.exe" -m pip install bpy --target=./vendor
 
 用法：
-  python build.py
+  python tools/build.py
 然后把 dist/ 整个文件夹发给用户。
 """
 import io
@@ -25,21 +25,19 @@ try:
 except (AttributeError, ValueError):
     pass
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 
 # 根目录下原样 copy 的文件
 COPY_FILES = [
     "convert.py",
-    "convert_3dxml_to_fbx.py",
-    "diagnose_fbx_units.py",
     "README.md",
     "SETUP.md",
 ]
 
-# 需要保持相对子目录结构 copy 的文件（convert.py 的 --verify 依赖 __test__/verify_fbx.py）
-COPY_SUBFILES = [
-    "__test__/verify_fbx.py",
+# 整目录 copy 的运行时包（convert.py 的转换/patch/--verify 全依赖它）
+COPY_DIRS = [
+    "converter",
 ]
 
 
@@ -56,15 +54,14 @@ def build():
         shutil.copy2(src, DIST / rel)
         print(f"[copy] {rel}")
 
-    for rel in COPY_SUBFILES:
+    for rel in COPY_DIRS:
         src = ROOT / rel
-        if not src.exists():
-            print(f"[warn] 源文件缺失，跳过: {rel}")
+        if not src.is_dir():
+            print(f"[warn] 源目录缺失，跳过: {rel}")
             continue
-        dst = DIST / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        print(f"[copy] {rel}")
+        shutil.copytree(src, DIST / rel,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        print(f"[copy] {rel}/")
 
     # config.json：生成空路径版（不 copy 作者本机的配置）
     with open(DIST / "config.json", "w", encoding="utf-8") as f:

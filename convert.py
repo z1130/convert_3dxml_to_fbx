@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """convert.py - 3DXML → FBX 一键转换（Unity + Three.js 双兼容）
 
-使用 pip 安装的 bpy（位于本项目 ./pip 目录，cp313 wheel），无需安装 Blender。
+使用 pip 安装的 bpy（位于本项目 ./vendor 目录，cp313 wheel），无需安装 Blender。
 
 自动串行执行：
   1. 进程内调用 convert_3dxml_to_fbx.convert() 导出中间 FBX
@@ -37,7 +37,7 @@ except (AttributeError, ValueError):
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = SCRIPT_DIR / "config.json"
-PIP_DIR = SCRIPT_DIR / "pip"
+PIP_DIR = SCRIPT_DIR / "vendor"
 
 # 由 setup_bpy_runtime() 填充：进程内调用的转换/验证模块
 _convert_module = None
@@ -117,7 +117,7 @@ def ensure_python313():
 
 
 def setup_bpy_runtime():
-    """加载 ./pip 中的 bpy 及转换/验证模块。必须在 ensure_python313 之后调用。"""
+    """加载 ./vendor 中的 bpy 及转换/验证模块。必须在 ensure_python313 之后调用。"""
     global _convert_module, _verify_module
 
     if not PIP_DIR.is_dir():
@@ -130,31 +130,26 @@ def setup_bpy_runtime():
     if pip_str not in sys.path:
         sys.path.insert(0, pip_str)
     try:
-        import bpy  # noqa: F401
+        import bpy as _bpy
     except ImportError as e:
         print(f"[error] 加载 bpy 失败（{PIP_DIR}）: {e}")
         print("        bpy wheel 为 cp313，请确认当前解释器为 Python 3.13。")
         sys.exit(1)
-    import bpy as _bpy
     print(f"[info] bpy {_bpy.app.version_string} / python {sys.version.split()[0]}")
 
-    # 转换模块（同目录）
+    # 转换/验证/补丁模块（converter 包，同目录）
     if str(SCRIPT_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPT_DIR))
-    import convert_3dxml_to_fbx as _c
+    from converter import convert_3dxml_to_fbx as _c
     _convert_module = _c
 
-    # 验证模块（__test__ 子目录）
-    test_dir = SCRIPT_DIR / "__test__"
-    if str(test_dir) not in sys.path:
-        sys.path.insert(0, str(test_dir))
-    import verify_fbx as _v
+    from converter import verify_fbx as _v
     _verify_module = _v
 
-    # diagnose_fbx_units（同目录，纯 Python）——延迟到此处 import，
+    # diagnose_fbx_units（纯 Python）——延迟到此处 import，
     # 与上方 SCRIPT_DIR 注入 sys.path 的逻辑一致。
     global patch_fbx
-    from diagnose_fbx_units import patch as patch_fbx  # noqa: E402
+    from converter.diagnose_fbx_units import patch as patch_fbx  # noqa: E402
 
 
 def collect_inputs(input_path, recursive=False):

@@ -6,21 +6,28 @@ vertices (matching the modeller's reference), proving the fix does NOT shrink
 geometry 100x. Read-only experiment - writes only to the system temp dir.
 
 Usage:
-  blender --background --python __test__/verify_export_scale.py -- <input.3dxml> <reference.fbx>
+  python tests/verify_export_scale.py <input.3dxml> <reference.fbx>   （系统 Python 3.13）
 """
 import os
 import sys
 import zipfile
 import tempfile
 import xml.etree.ElementTree as ET
-from mathutils import Matrix
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)  # project root: converter package lives there
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+# 系统 Python（3.13）直接运行：把项目根目录 ./vendor 加入 sys.path 以加载 bpy。
+_PIP_DIR = os.path.join(_ROOT, 'vendor')
+if os.path.isdir(_PIP_DIR) and _PIP_DIR not in sys.path:
+    sys.path.insert(0, _PIP_DIR)
 
 import bpy
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(_HERE)  # project root: convert_3dxml_to_fbx + diagnose_fbx_units live there
-sys.path.insert(0, _ROOT)
-import convert_3dxml_to_fbx as C
-import diagnose_fbx_units as D
+from mathutils import Matrix
+
+from converter import convert_3dxml_to_fbx as C
+from converter import diagnose_fbx_units as D
 
 BASE = dict(use_selection=False, object_types={'EMPTY', 'MESH'},
             mesh_smooth_type='FACE', use_mesh_modifiers=True, bake_anim=False,
@@ -55,7 +62,7 @@ def build_scene(in_path):
     C.link_obj(root_obj)
     tops = [i for i in C.INSTANCES if i['agg'] == root_ref]
     for top in tops:
-        C.expand(top, root_obj, 0)
+        C.expand(top, root_obj)
     if not tops:
         info = C.REFERENCES.get(root_ref)
         if info and info['rep_file']:
@@ -102,14 +109,10 @@ def fmt(rs, size):
 
 
 def main():
-    argv = sys.argv
-    if '--' in argv:
-        argv = argv[argv.index('--') + 1:]
-    else:
-        argv = []
+    argv = sys.argv[1:]
 
     if len(argv) < 2:
-        print('[error] 用法: blender --background --python __test__/verify_export_scale.py -- <input.3dxml> <reference.fbx>')
+        print('[error] 用法: python tests/verify_export_scale.py <input.3dxml> <reference.fbx>')
         sys.exit(1)
 
     in_path = os.path.abspath(argv[0])

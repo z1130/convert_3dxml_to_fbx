@@ -11,9 +11,9 @@ Output is engineered for compatibility with three.js THREE.FBXLoader:
   - pure triangulated meshes, no animation/bones
 
 Runs on the pip-installed `bpy` module (Python 3.13). Either call directly:
-  python convert_3dxml_to_fbx.py input.3dxml output.fbx
+  python converter/convert_3dxml_to_fbx.py input.3dxml output.fbx
 or import in-process:
-  from convert_3dxml_to_fbx import convert; convert(in, out)
+  from converter.convert_3dxml_to_fbx import convert; convert(in, out)
 """
 import os
 import sys
@@ -22,9 +22,10 @@ import tempfile
 import traceback
 import xml.etree.ElementTree as ET
 
-# 允许在系统 Python（3.13）下直接运行：把同目录 ./pip 加入 sys.path 以加载 bpy。
-# 进程内 import 时 sys.path 已含则跳过；目录不存在则跳过（兼容旧式 Blender 内运行）。
-_PIP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pip')
+# 允许在系统 Python（3.13）下直接运行：把项目根目录 ./vendor 加入 sys.path 以加载 bpy。
+# 进程内 import 时 sys.path 已含则跳过；目录不存在则跳过（import 失败时给出安装提示）。
+_PIP_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vendor'))
 if os.path.isdir(_PIP_DIR) and _PIP_DIR not in sys.path:
     sys.path.insert(0, _PIP_DIR)
 
@@ -34,7 +35,7 @@ try:
 except ImportError:
     raise SystemExit(
         "无法加载 bpy。请在项目根目录执行（需 Python 3.13）：\n"
-        "  \"C:/Path/To/Python313/python.exe\" -m pip install bpy --target=./pip\n"
+        "  \"C:/Path/To/Python313/python.exe\" -m pip install bpy --target=./vendor\n"
         "bpy wheel 仅支持 cp313，不能用其他 Python 版本加载。"
     )
 
@@ -126,13 +127,14 @@ def expand_face(face, base):
 
 
 def parse_rep_file(path):
-    """Parse one .3DRep -> (verts, norms, tris).
+    """Parse one .3DRep -> (verts, tris).
 
     All PolygonalRepType entries in the file are merged into a single mesh
-    (one part = one mesh). `tris` items are (a, b, c, rgba).
+    (one part = one mesh). `tris` items are (a, b, c, rgba). Normals are not
+    read: meshes use smooth shading, so Blender computes them.
     """
     root = ET.parse(path).getroot()
-    verts, norms, tris = [], [], []
+    verts, tris = [], []
     polys = [el for el in root.iter()
              if lname(el.tag) == 'Rep' and el.get(XSI_TYPE) == 'PolygonalRepType']
     for rep in polys:
@@ -142,11 +144,8 @@ def parse_rep_file(path):
         pos = parse_vec3s(text_of(vb, 'Positions') or '')
         if not pos:
             continue
-        nor = parse_vec3s(text_of(vb, 'Normals') or '')
         base = len(verts)
         verts.extend((p[0] * MM_TO_M, p[1] * MM_TO_M, p[2] * MM_TO_M) for p in pos)
-        norms.extend(nor if len(nor) == len(pos)
-                     else [(0.0, 0.0, 1.0)] * len(pos))
 
         # Prefer the direct <Faces> (full precision); fall back to the
         # smallest-accuracy <PolygonalLOD>.
@@ -162,7 +161,7 @@ def parse_rep_file(path):
             rgba = face_color(face)
             for a, b, c in expand_face(face, base):
                 tris.append((a, b, c, rgba))
-    return verts, norms, tris
+    return verts, tris
 
 
 # --------------------------------------------------------------------------- #
@@ -199,7 +198,8 @@ def build_mesh_data(name, verts, tris):
     for (_, _, _, rgba) in tris:
         if rgba not in color_to_idx:
             color_to_idx[rgba] = len(color_to_idx)
-    for rgba, idx in sorted(color_to_idx.items(), key=lambda kv: kv[1]):
+    # dict 插入序即 idx 顺序（idx 按 len() 递增分配），无需排序
+    for rgba, idx in color_to_idx.items():
         mesh.materials.append(make_material(f"{name}_{idx}", rgba))
     for poly, (_, _, _, rgba) in zip(mesh.polygons, tris):
         poly.material_index = color_to_idx[rgba]
@@ -289,9 +289,9 @@ def parse_cached(rep_file):
     if not os.path.exists(path):
         PARSE_CACHE[rep_file] = None
         return None
-    verts, norms, tris = parse_rep_file(path)
+    verts, tris = parse_rep_file(path)
     print(f"  [rep] {rep_file}: verts={len(verts)} tris={len(tris)}")
-    res = (verts, norms, tris) if tris else None
+    res = (verts, tris) if tris else None
     PARSE_CACHE[rep_file] = res
     return res
 
@@ -306,13 +306,13 @@ def build_object_mesh(rep_file):
     res = parse_cached(rep_file)
     if res is None:
         return None
-    verts, _norms, tris = res
+    verts, tris = res
     MESH_COUNT += 1
     return build_mesh_data(
         f"{rep_file.replace('.3DRep', '')}_{MESH_COUNT}", verts, tris)
 
 
-def expand(inst, parent_obj, depth):
+def expand(inst, parent_obj):
     global NODE_COUNT
     ref = REFERENCES.get(inst['inst'])
     name = inst['name'] or (ref['name'] if ref else 'node')
@@ -330,7 +330,7 @@ def expand(inst, parent_obj, depth):
     if inst['matrix']:
         obj.matrix_basis = relmatrix_to_mat4(inst['matrix'])
     for ch in children:
-        expand(ch, obj, depth + 1)
+        expand(ch, obj)
 
 
 # --------------------------------------------------------------------------- #
@@ -389,13 +389,12 @@ def export_fbx(filepath):
     )
     try:
         bpy.ops.export_scene.fbx(**full)
-        return True
+        return
     except (TypeError, KeyError) as e:
         print(f"[warn] full export kwargs rejected ({e}); retry minimal set")
     minimal = dict(filepath=filepath, use_selection=False,
                    object_types={'EMPTY', 'MESH'}, bake_anim=False)
     bpy.ops.export_scene.fbx(**minimal)
-    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -445,7 +444,7 @@ def convert(in_path, out_path):
     link_obj(root_obj)
     top_instances = [i for i in INSTANCES if i['agg'] == root_ref]
     for top in top_instances:
-        expand(top, root_obj, 0)
+        expand(top, root_obj)
     # Single-part files have no Instance3D: the geometry is attached directly
     # to the root Reference3D via InstanceRep (IsAggregatedBy -> root,
     # IsInstanceOf -> ReferenceRep). parse_structure already wired that
@@ -494,13 +493,9 @@ def convert(in_path, out_path):
 
 
 def main():
-    argv = sys.argv
-    if '--' in argv:  # 兼容 `blender --python ... --` 旧调用
-        argv = argv[argv.index('--') + 1:]
-    else:
-        argv = argv[1:]  # 系统 Python 直接运行：去掉脚本名
+    argv = sys.argv[1:]
     if len(argv) < 2:
-        print("[error] 用法: python convert_3dxml_to_fbx.py <input.3dxml> <output.fbx>")
+        print("[error] 用法: python converter/convert_3dxml_to_fbx.py <input.3dxml> <output.fbx>")
         sys.exit(1)
     convert(argv[0], argv[1])
 

@@ -12,7 +12,6 @@ Usage:
 import struct
 import sys
 
-DOUBLE_1_0 = struct.pack('<d', 1.0)
 DOUBLE_100 = struct.pack('<d', 100.0)
 TARGET_KEYS = ('UnitScaleFactor', 'OriginalUnitScaleFactor')
 
@@ -108,7 +107,7 @@ def read_unit_metadata(path):
 
 
 def report(path):
-    data, version, offsets = read_unit_metadata(path)
+    _, version, offsets = read_unit_metadata(path)
     print(f'--- {path}  (FBX {version}) ---')
     if not offsets:
         print('  (no UnitScaleFactor found)')
@@ -125,7 +124,7 @@ def patch(in_path, out_path):
     changed = []
     for k in TARGET_KEYS:
         if k in offsets:
-            vstart, val = offsets[k]
+            vstart, _ = offsets[k]
             current = struct.unpack('<d', buf[vstart:vstart + 8])[0]
             buf[vstart:vstart + 8] = DOUBLE_100
             changed.append(f'{k}: {current} -> 100.0')

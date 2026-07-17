@@ -10,13 +10,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 基于 pip 版 bpy 运行（关键约束）
 
-核心转换脚本依赖 `bpy`，但**不再通过 Blender 二进制运行**——改用 pip 安装的 `bpy` wheel（Blender Foundation 官方发布于 PyPI），安装在项目根目录 `./pip` 下。`convert.py` 顶部把 `./pip` 注入 `sys.path` 后 `import bpy`，并在**同一进程内**直接调用 `convert_3dxml_to_fbx.convert()` / `verify_fbx.verify()`，无任何子进程。
+核心转换脚本依赖 `bpy`，但**不再通过 Blender 二进制运行**——改用 pip 安装的 `bpy` wheel（Blender Foundation 官方发布于 PyPI），安装在项目根目录 `./vendor` 下。`convert.py` 顶部把 `./vendor` 注入 `sys.path` 后 `import bpy`，并在**同一进程内**直接调用 `converter.convert_3dxml_to_fbx.convert()` / `converter.verify_fbx.verify()`，无任何子进程。
 
 **Python 版本锁定**：bpy wheel 仅发布 cp313（当前 `bpy 5.1.2`），**必须 Python 3.13** 才能加载。`convert.py` 的 `ensure_python313()` 检测当前解释器版本，若非 3.13，按优先级（`config.json.python_path` → `PYTHON313` 环境变量 → PATH → 默认安装路径）找到 Python 3.13 解释器，用 `os.execv` **重启自身**。用户无论用哪个 Python 启动 `convert.py` 都会自动切到 3.13，无需手动指定。
 
 安装 bpy（一次性）：
 ```bash
-"<Python313>/python.exe" -m pip install bpy --target=./pip
+"<Python313>/python.exe" -m pip install bpy --target=./vendor
 ```
 本机 Python 3.13 在 `C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe`。
 
@@ -40,20 +40,20 @@ python convert.py resources/ -o output_fbx --continue-on-error
 python convert.py input.3dxml --verify
 
 # 手动分步（高级用户 / 故障排查）
-python convert_3dxml_to_fbx.py input.3dxml input.fbx
-python diagnose_fbx_units.py --patch input.fbx input.fbx
+python converter/convert_3dxml_to_fbx.py input.3dxml input.fbx
+python converter/diagnose_fbx_units.py --patch input.fbx input.fbx
 
 # FBXLoader 浏览器实测（需先起本地服务器避免 CORS）
 python -m http.server 8000
-# 然后浏览器开 http://127.0.0.1:8000/__test__/test_fbx_loader.html?model=../input.fbx
+# 然后浏览器开 http://127.0.0.1:8000/tests/test_fbx_loader.html?model=../input.fbx
 
 # 构建分发包（生成 dist/ 发给用户）
-python build.py
+python tools/build.py
 ```
 
 **进程内调用约定**（改 `convert.py` / 转换脚本必读）：转换与验证都是**同进程函数调用**（`_convert_module.convert(...)` / `_verify_module.verify(...)`），不再是子进程。`convert_3dxml_to_fbx.convert()` 在开头重置所有 module-level globals（`TMPDIR/REFERENCES/INSTANCES/PARSE_CACHE/NODE_COUNT/MESH_COUNT`），保证批量模式下多次调用互不污染——`PARSE_CACHE` 若不重置，第二个文件会复用上一文件的缓存而读到错误的解压几何。`diagnose_fbx_units.patch` 仍为进程内 import 调用。**改回 Blender 子进程会破坏整个工作流，勿改。**
 
-## 转换脚本架构（convert_3dxml_to_fbx.py）
+## 转换脚本架构（converter/convert_3dxml_to_fbx.py）
 
 单文件、线性 5 阶段流水线，理解全局需读整个文件：
 
@@ -73,7 +73,7 @@ python build.py
 
 **④ 单位换算 + scale + 根基准点 + 双兼容 patch** — 3DXML 几何/平移是 mm：`parse_rep_file` 顶点与 `relmatrix_to_mat4` 平移都 ÷1000（`MM_TO_M`）。**对齐 CATIA/建模人员 FBX（Unity 友好）的导出配方（三要素缺一不可）**：① `clear_scene()` 末尾设 `scene.unit_settings.scale_length=0.01`（声明场景单位=cm）；② `export_fbx()` 用 `apply_unit_scale=True`；③ `global_scale=1.0`。三者配合抵消 Blender 的 m→cm 根 `scale=100` 补偿，得到根 `scale=(1,1,1)`、顶点与 `Lcl Translation` 均为米制——与建模人员手处理 FBX 逐节点 transform 完全同量级（实测同物体 max|T| 与各节点数值逐一吻合）。**关键：单独调 `apply_unit_scale`/`global_scale` 无法把根 scale 降到 1（实测 4 种组合最小只能 100），必须配 `scale_length=0.01`；且这些 kwarg 不碰几何顶点（4 种组合下顶点 SIZE 恒定）**。漏掉÷1000 会 position×1000；漏掉 `scale_length=0.01` 会根 scale=100 且 translation 同比×100。
 
-**Unity + Three.js 双兼容**：Three.js 直接按几何顶点坐标渲染，忽略 FBX 头 `UnitScaleFactor`；Unity 则按 `UnitScaleFactor/100` 缩放视觉尺寸。Blender 的 FBX 导出器硬编码 `UnitScaleFactor=1.0`，导致 Unity 中模型缩小 100 倍。`convert.py` 导出后自动调用 `diagnose_fbx_units.py --patch` 将 `UnitScaleFactor`/`OriginalUnitScaleFactor` 写为 100，使 Unity 视觉尺寸与 Three.js 一致。patch 只改 2 个 double、不动几何/transform，因此**一个 FBX 即可同时满足 Web 端 Three.js 和 Unity**。构建后 `world_bbox()`（前置 `bpy.context.view_layer.update()` 刷新 matrix_world）算包围盒中心，上提到根节点（`root_obj.location=C`，顶层子节点 `matrix_basis.translation-=C`），使 `root.position`=模型几何中心、世界坐标不变。调单位配方后用 `__test__/verify_export_scale.py`（Blender 内跑，需传入 `.3dxml` 和参考 `.fbx`）回归：4 配置 × patch USF=100，回读根 scale + 顶点 SIZE 对照标杆。
+**Unity + Three.js 双兼容**：Three.js 直接按几何顶点坐标渲染，忽略 FBX 头 `UnitScaleFactor`；Unity 则按 `UnitScaleFactor/100` 缩放视觉尺寸。Blender 的 FBX 导出器硬编码 `UnitScaleFactor=1.0`，导致 Unity 中模型缩小 100 倍。`convert.py` 导出后自动调用 `diagnose_fbx_units.py --patch` 将 `UnitScaleFactor`/`OriginalUnitScaleFactor` 写为 100，使 Unity 视觉尺寸与 Three.js 一致。patch 只改 2 个 double、不动几何/transform，因此**一个 FBX 即可同时满足 Web 端 Three.js 和 Unity**。构建后 `world_bbox()`（前置 `bpy.context.view_layer.update()` 刷新 matrix_world）算包围盒中心，上提到根节点（`root_obj.location=C`，顶层子节点 `matrix_basis.translation-=C`），使 `root.position`=模型几何中心、世界坐标不变。调单位配方后用 `tests/verify_export_scale.py`（Python 3.13 直跑，传入 `.3dxml` 和参考 `.fbx`）回归：5 配置 × patch USF=100，回读根 scale + 顶点 SIZE 对照标杆。
 
 装配树展开用 `obj.matrix_parent_inverse = Identity` + `obj.matrix_basis = relative_matrix`，保证 `matrix_basis` 就是 local→parent 的 RelativeMatrix。
 
@@ -81,15 +81,14 @@ python build.py
 
 `strips` 段内第 i 个三角形按奇偶位翻转缠绕（`if i%2==1: swap a,b`）保证法线一致；`fans` 首点为中心 `(c, v[i], v[i+1])`。改这里会批量翻转法线。
 
-## 验证页（test_fbx_loader.html）
+## 验证页（tests/test_fbx_loader.html）
 
 用 importmap 从 unpkg CDN 加载 three@0.160 + FBXLoader，渲染 FBX 并打印 mesh/三角面/包围盒。必须通过 URL 参数 `?model=../xxx.fbx` 指定加载文件，不传参会提示缺少模型路径。改 axis/矩阵后用此页确认渲染效果。需本地服务器（非 file://）。
 
 ## 数据文件说明
 
-- `input.3dxml` — 示例输入（zip）。解压后内部含 `test.3dxml`(产品结构)、`Manifest.xml`(入口)、`*.3DRep`(几何：`NonAscii_6/9` 为空 `<Root/>`、`229009.3DRep` 是主大件)、`CATMaterialRef.3dxml` + `material_*_Rendering.3DRep`(材质库 OSM，**缺到零件的绑定**，故用面内联 RGBA 降级)。脚本运行时自动解压到系统临时目录，无需手动解压。
-- `input.fbx` — 转换输出（可重新生成，`convert.py` 默认输出与输入同名）。
-- `config.json` — Python 3.13 解释器路径配置（`python_path`，随仓库提交，用户拿到后修改本地路径）。`./pip/` 是 bpy wheel 安装目录（350MB+，不随仓库提交）。
+- `resources/` — 示例输入 `.3dxml` 与转换输出（不随仓库提交）。3DXML 为 zip：内部含 `test.3dxml`(产品结构)、`Manifest.xml`(入口)、`*.3DRep`(几何)、材质库 OSM（**缺到零件的绑定**，故用面内联 RGBA 降级）。脚本运行时自动解压到系统临时目录，无需手动解压。
+- `config.json` — Python 3.13 解释器路径配置（`python_path`，随仓库提交，用户拿到后修改本地路径）。`./vendor/` 是 bpy wheel 安装目录（350MB+，不随仓库提交）。
 
 ## 仅支持 XML 型 .3DRep
 

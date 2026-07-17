@@ -2,8 +2,7 @@
 __pycache__/
 resources/
 dist/
-pip_download_cache/
-pip/
+vendor/
 *.fbx
 *.3dxml
 *.zip

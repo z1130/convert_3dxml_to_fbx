@@ -2,16 +2,15 @@
 structure / geometry / materials / bounding box.
 
 运行方式：
-  python verify_fbx.py output.fbx                        （系统 Python 3.13 + ./pip/bpy）
-  blender --background --python verify_fbx.py -- out.fbx  （旧式 Blender 内运行）
+  python converter/verify_fbx.py output.fbx      （系统 Python 3.13 + ./vendor/bpy）
 或被 convert.py 在进程内调用：verify_fbx.verify(path)。
 """
 import os
 import sys
 
-# 允许在系统 Python（3.13）下直接运行：把上级 ./pip 加入 sys.path 以加载 bpy。
+# 允许在系统 Python（3.13）下直接运行：把项目根目录 ./vendor 加入 sys.path 以加载 bpy。
 _PIP_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'pip'))
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vendor'))
 if os.path.isdir(_PIP_DIR) and _PIP_DIR not in sys.path:
     sys.path.insert(0, _PIP_DIR)
 
@@ -72,8 +71,7 @@ def verify(fbx):
 
 
 def main():
-    argv = sys.argv
-    argv = argv[argv.index('--') + 1:] if '--' in argv else argv[1:]
+    argv = sys.argv[1:]
     fbx = argv[0] if argv else 'output.fbx'
     verify(fbx)
 
