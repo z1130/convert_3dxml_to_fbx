@@ -238,6 +238,7 @@ Web 模式的「3D 预览」按钮在页面内直接渲染转换产物（与 FBX
 
 - **两种输入**：`<input multiple>` 选文件 / `<input webkitdirectory>` 选文件夹；拖拽经 `webkitGetAsEntry` 递归遍历目录。只收 `.3dxml`。
 - **任务四态**：排队中 / 转换中（不定态进度条——服务端拿不到 bpy 真实进度）/ 成功（下载 FBX、3D 预览）/ 失败（错误条 + 展开详情 + 重试）。
+- **帮助入口**：右上角 `?` 按钮展开使用说明弹窗，便于新用户快速了解操作流程。
 - **文件夹任务**显示相对路径；ZIP 打包保持目录结构（UTF-8 文件名）。
 - **预览抽屉**：右侧滑出（约 48vw），深底 + 浅网格地面，鼠标旋转/缩放/平移。
 - **字体栈**：中文 `"PingFang SC", "Microsoft YaHei"`；数据 `"JetBrains Mono", "PingFang SC", "Microsoft YaHei"`（拉丁走 Mono，中文按字符回退）。
