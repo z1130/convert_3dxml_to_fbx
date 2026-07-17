@@ -6,23 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **3DXML → FBX 转换工具**（非传统软件项目，无构建系统/测试框架/依赖管理）。核心是：两个 Blender 脚本 + 一个 Python wrapper + 一个 HTML 验证页，把 CATIA V5 导出的 3DXML 转为同时兼容 **Three.js FBXLoader** 和 **Unity** 的 FBX。`README.md` 含完整用法。
 
-用户日常入口是 `convert.py`：它自动串行调用 `convert_3dxml_to_fbx.py`（Blender 内导出）和 `diagnose_fbx_units.py --patch`（改写 FBX 头 `UnitScaleFactor=100`，Unity 兼容）。
+用户日常入口是 `convert.py`：它自动串行**进程内**调用 `convert_3dxml_to_fbx.convert()`（导出）和 `diagnose_fbx_units.patch`（改写 FBX 头 `UnitScaleFactor=100`，Unity 兼容）。
 
-## 必须用 Blender 运行（关键约束）
+## 基于 pip 版 bpy 运行（关键约束）
 
-核心转换脚本依赖 `bpy`（Blender 内置模块），**普通 `python` 无法运行**。用户通过 `convert.py` 统一调用，无需手写 Blender 命令。
+核心转换脚本依赖 `bpy`，但**不再通过 Blender 二进制运行**——改用 pip 安装的 `bpy` wheel（Blender Foundation 官方发布于 PyPI），安装在项目根目录 `./pip` 下。`convert.py` 顶部把 `./pip` 注入 `sys.path` 后 `import bpy`，并在**同一进程内**直接调用 `convert_3dxml_to_fbx.convert()` / `verify_fbx.verify()`，无任何子进程。
 
-`convert_3dxml_to_fbx.py` 与 `verify_fbx.py` 以 headless 方式调用：
+**Python 版本锁定**：bpy wheel 仅发布 cp313（当前 `bpy 5.1.2`），**必须 Python 3.13** 才能加载。`convert.py` 的 `ensure_python313()` 检测当前解释器版本，若非 3.13，按优先级（`config.json.python_path` → `PYTHON313` 环境变量 → PATH → 默认安装路径）找到 Python 3.13 解释器，用 `os.execv` **重启自身**。用户无论用哪个 Python 启动 `convert.py` 都会自动切到 3.13，无需手动指定。
 
+安装 bpy（一次性）：
 ```bash
-"E:\Blender\blender.exe" --background --factory-startup --python <script>.py -- <args...>
+"<Python313>/python.exe" -m pip install bpy --target=./pip
 ```
-
-- `--factory-startup` 跳过用户配置，保证干净环境。
-- `--` 之后的参数才传给脚本（脚本内 `sys.argv[argv.index('--')+1:]` 解析）。
-- 本机 Blender 5.0 在 `E:\Blender\blender.exe`（内置 Python 3.11）。
-
-Blender 路径通过 `config.json`（随仓库提交，用户拿到后修改本地路径）或 `BLENDER` 环境变量配置，`convert.py` 会按优先级查找。
+本机 Python 3.13 在 `C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe`。
 
 常用命令：
 ```bash
@@ -40,11 +36,11 @@ python convert.py resources -r -o output_fbx
 # 批量时单个失败继续
 python convert.py resources/ -o output_fbx --continue-on-error
 
-# 转换 + Blender 回读验证
+# 转换 + 回读验证
 python convert.py input.3dxml --verify
 
 # 手动分步（高级用户 / 故障排查）
-"E:\Blender\blender.exe" --background --factory-startup --python convert_3dxml_to_fbx.py -- input.3dxml input.fbx
+python convert_3dxml_to_fbx.py input.3dxml input.fbx
 python diagnose_fbx_units.py --patch input.fbx input.fbx
 
 # FBXLoader 浏览器实测（需先起本地服务器避免 CORS）
@@ -55,7 +51,7 @@ python -m http.server 8000
 python build.py
 ```
 
-**分发与双模式启动**（改 `convert.py` 必读）：`convert.py` 的 argv 解析兼容 Blender 的 `--`，既可 `python convert.py ...`（系统 Python），也可 `blender --background --factory-startup --python convert.py -- ...`（Blender 自带 Python）启动——用户无需另装 Python。patch 步骤（USF=100）已改为进程内 `from diagnose_fbx_units import patch` 调用（顶部 `sys.path.insert(SCRIPT_DIR)` 保障 Blender 内可 import 同目录模块），**不再是 `sys.executable` 子进程**。**改 `convert.py` 时勿把 patch 改回子进程调用、勿破坏 argv 的 `--` 兼容，否则会破坏「无系统 Python」分发。**
+**进程内调用约定**（改 `convert.py` / 转换脚本必读）：转换与验证都是**同进程函数调用**（`_convert_module.convert(...)` / `_verify_module.verify(...)`），不再是子进程。`convert_3dxml_to_fbx.convert()` 在开头重置所有 module-level globals（`TMPDIR/REFERENCES/INSTANCES/PARSE_CACHE/NODE_COUNT/MESH_COUNT`），保证批量模式下多次调用互不污染——`PARSE_CACHE` 若不重置，第二个文件会复用上一文件的缓存而读到错误的解压几何。`diagnose_fbx_units.patch` 仍为进程内 import 调用。**改回 Blender 子进程会破坏整个工作流，勿改。**
 
 ## 转换脚本架构（convert_3dxml_to_fbx.py）
 
@@ -93,7 +89,7 @@ python build.py
 
 - `input.3dxml` — 示例输入（zip）。解压后内部含 `test.3dxml`(产品结构)、`Manifest.xml`(入口)、`*.3DRep`(几何：`NonAscii_6/9` 为空 `<Root/>`、`229009.3DRep` 是主大件)、`CATMaterialRef.3dxml` + `material_*_Rendering.3DRep`(材质库 OSM，**缺到零件的绑定**，故用面内联 RGBA 降级)。脚本运行时自动解压到系统临时目录，无需手动解压。
 - `input.fbx` — 转换输出（可重新生成，`convert.py` 默认输出与输入同名）。
-- `config.json` — Blender 路径配置（随仓库提交，用户拿到后修改本地路径）。
+- `config.json` — Python 3.13 解释器路径配置（`python_path`，随仓库提交，用户拿到后修改本地路径）。`./pip/` 是 bpy wheel 安装目录（350MB+，不随仓库提交）。
 
 ## 仅支持 XML 型 .3DRep
 

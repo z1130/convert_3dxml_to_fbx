@@ -2,8 +2,11 @@
 """build.py - 把分发所需的文件整理到 dist/。
 
 用户拿到的文件夹应只含运行所需脚本 + 文档，排除示例数据与开发产物。
-config.json 生成空路径版（解绑作者本机路径，让用户机器上的 find_blender
+config.json 生成空路径版（解绑作者本机路径，让用户机器上的 find_python313
 走自动探测：环境变量 → PATH → 默认安装路径）。
+
+注意：./pip（bpy 依赖，350MB+）不打包进 dist，用户需自行安装 bpy：
+  "<Python313>/python.exe" -m pip install bpy --target=./pip
 
 用法：
   python build.py
@@ -65,9 +68,9 @@ def build():
 
     # config.json：生成空路径版（不 copy 作者本机的配置）
     with open(DIST / "config.json", "w", encoding="utf-8") as f:
-        json.dump({"blender_path": ""}, f, indent=2, ensure_ascii=False)
+        json.dump({"python_path": ""}, f, indent=2, ensure_ascii=False)
         f.write("\n")
-    print("[gen]  config.json (blender_path 留空，走自动探测)")
+    print("[gen]  config.json (python_path 留空，走自动探测)")
 
     print(f"\n[ok] 分发包已生成: {DIST}")
 

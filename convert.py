@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """convert.py - 3DXML → FBX 一键转换（Unity + Three.js 双兼容）
 
+使用 pip 安装的 bpy（位于本项目 ./pip 目录，cp313 wheel），无需安装 Blender。
+
 自动串行执行：
-  1. Blender headless 运行 convert_3dxml_to_fbx.py 导出中间 FBX
-  2. diagnose_fbx_units.py --patch 将 UnitScaleFactor 改为 100.0
+  1. 进程内调用 convert_3dxml_to_fbx.convert() 导出中间 FBX
+  2. diagnose_fbx_units.patch 将 UnitScaleFactor 改为 100.0
      （Unity 按 USF/100 缩放视觉尺寸；Three.js 忽略该字段，故同一个 FBX
       在 Three.js 中按原始几何坐标显示，在 Unity 中视觉尺寸与 Three.js 一致）
-  3. 可选：--verify 调用 Blender 回读验证
+  3. 可选：--verify 进程内回读验证
+
+bpy wheel 仅支持 Python 3.13。若本进程不是 3.13，会自动查找 Python 3.13
+解释器并重新执行自身（os.execv），用户无需手动指定解释器。
 
 支持单文件转换或批量转换整个目录。
 """
@@ -16,10 +21,10 @@ import io
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from pathlib import Path
 
 # Windows 控制台默认编码可能不是 UTF-8，强制标准输出/错误使用 UTF-8，
@@ -32,22 +37,11 @@ except (AttributeError, ValueError):
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = SCRIPT_DIR / "config.json"
-CONVERT_SCRIPT = SCRIPT_DIR / "convert_3dxml_to_fbx.py"
-VERIFY_SCRIPT = SCRIPT_DIR / "__test__" / "verify_fbx.py"
+PIP_DIR = SCRIPT_DIR / "pip"
 
-# 把脚本目录加入 sys.path：Blender 以 `--python convert.py` 加载本脚本时，
-# 脚本所在目录默认不在 sys.path 中，需显式加入才能 import 同目录模块。
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
-from diagnose_fbx_units import patch as patch_fbx  # noqa: E402
-
-DEFAULT_BLENDER_PATHS = [
-    r"E:\Blender\blender.exe",
-    r"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe",
-    r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe",
-    r"C:\Program Files\Blender Foundation\Blender 4.1\blender.exe",
-    r"C:\Program Files\Blender Foundation\Blender 4.0\blender.exe",
-]
+# 由 setup_bpy_runtime() 填充：进程内调用的转换/验证模块
+_convert_module = None
+_verify_module = None
 
 
 def load_config():
@@ -62,71 +56,105 @@ def load_config():
     return {}
 
 
-def find_blender():
-    """按优先级查找 Blender 可执行文件路径。"""
+def find_python313():
+    """按优先级查找 Python 3.13 解释器路径。"""
     # 1. 配置文件
     cfg = load_config()
-    blender = cfg.get("blender_path")
-    if blender:
-        blender = Path(blender).expanduser()
-        if blender.exists():
-            return str(blender)
-        print(f"[warn] 配置文件中的 Blender 路径不存在: {blender}")
+    py = cfg.get("python_path")
+    if py:
+        py = Path(py).expanduser()
+        if py.exists():
+            return str(py)
+        print(f"[warn] 配置文件中的 python_path 不存在: {py}")
 
     # 2. 环境变量
-    blender = os.environ.get("BLENDER")
-    if blender:
-        blender = Path(blender).expanduser()
-        if blender.exists():
-            return str(blender)
-        print(f"[warn] BLENDER 环境变量指向的路径不存在: {blender}")
+    py = os.environ.get("PYTHON313")
+    if py:
+        py = Path(py).expanduser()
+        if py.exists():
+            return str(py)
+        print(f"[warn] PYTHON313 环境变量指向的路径不存在: {py}")
 
     # 3. PATH
-    for name in ("blender.exe", "blender"):
+    for name in ("python3.13.exe", "python3.13"):
         found = shutil.which(name)
         if found:
             return found
 
-    # 4. 常见安装路径
-    for p in DEFAULT_BLENDER_PATHS:
-        if Path(p).exists():
-            return p
+    # 4. 常见安装路径（Windows + Linux；不存在的会被 exists() 过滤）
+    candidates = [
+        # Windows
+        Path.home() / "AppData/Local/Programs/Python/Python313/python.exe",
+        Path("C:/Python313/python.exe"),
+        Path("C:/Program Files/Python313/python.exe"),
+        # Linux
+        Path("/usr/bin/python3.13"),
+        Path("/usr/local/bin/python3.13"),
+        Path.home() / ".local/bin/python3.13",
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
 
     return None
 
 
-def fail_no_blender():
-    print("[error] 找不到 Blender。请按以下方式之一配置：")
-    print(f"  1. 编辑 {CONFIG_PATH}，填写 blender_path（如 E:/Blender/blender.exe）")
-    print(f"  2. 或设置 BLENDER 环境变量")
-    sys.exit(1)
+def ensure_python313():
+    """bpy wheel 仅 cp313。若当前解释器不是 3.13，找到 3.13 并 execv 重启自身。"""
+    if sys.version_info[:2] == (3, 13):
+        return
+    py = find_python313()
+    if not py:
+        print("[error] 加载 bpy 需要 Python 3.13，但找不到 Python 3.13 解释器。")
+        print("        请按以下方式之一配置：")
+        print(f"  1. 编辑 {CONFIG_PATH}，填写 python_path")
+        print(f"  2. 设置 PYTHON313 环境变量")
+        print(f"  3. 安装 Python 3.13 到默认路径")
+        sys.exit(1)
+    print(f"[info] 当前 Python {sys.version.split()[0]}，自动切换到 {py}")
+    # execv 替换当前进程：新进程重新跑 convert.py，此时已是 3.13。
+    os.execv(py, [py, str(SCRIPT_DIR / "convert.py")] + sys.argv[1:])
 
 
-def run(cmd, *, need_shell=False, description=None):
-    """运行外部命令，失败时打印并退出。"""
-    desc = description or " ".join(str(c) for c in cmd)
-    print(f"[run] {desc}")
-    try:
-        result = subprocess.run(
-            [str(c) for c in cmd],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            shell=need_shell,
-        )
-    except FileNotFoundError as e:
-        print(f"[error] 命令未找到: {e}")
+def setup_bpy_runtime():
+    """加载 ./pip 中的 bpy 及转换/验证模块。必须在 ensure_python313 之后调用。"""
+    global _convert_module, _verify_module
+
+    if not PIP_DIR.is_dir():
+        print(f"[error] 未找到 bpy 安装目录: {PIP_DIR}")
+        print("        请先在项目根目录安装 bpy：")
+        print(f'          "<Python313>/python.exe" -m pip install bpy --target="{PIP_DIR.name}"')
         sys.exit(1)
 
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.returncode != 0:
-        print(f"[error] 命令失败 (exit {result.returncode}): {desc}")
-        sys.exit(result.returncode)
-    return result
+    pip_str = str(PIP_DIR)
+    if pip_str not in sys.path:
+        sys.path.insert(0, pip_str)
+    try:
+        import bpy  # noqa: F401
+    except ImportError as e:
+        print(f"[error] 加载 bpy 失败（{PIP_DIR}）: {e}")
+        print("        bpy wheel 为 cp313，请确认当前解释器为 Python 3.13。")
+        sys.exit(1)
+    import bpy as _bpy
+    print(f"[info] bpy {_bpy.app.version_string} / python {sys.version.split()[0]}")
+
+    # 转换模块（同目录）
+    if str(SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPT_DIR))
+    import convert_3dxml_to_fbx as _c
+    _convert_module = _c
+
+    # 验证模块（__test__ 子目录）
+    test_dir = SCRIPT_DIR / "__test__"
+    if str(test_dir) not in sys.path:
+        sys.path.insert(0, str(test_dir))
+    import verify_fbx as _v
+    _verify_module = _v
+
+    # diagnose_fbx_units（同目录，纯 Python）——延迟到此处 import，
+    # 与上方 SCRIPT_DIR 注入 sys.path 的逻辑一致。
+    global patch_fbx
+    from diagnose_fbx_units import patch as patch_fbx  # noqa: E402
 
 
 def collect_inputs(input_path, recursive=False):
@@ -157,8 +185,8 @@ def resolve_output_for_batch(input_file, output_dir):
     return input_file.with_suffix(".fbx")
 
 
-def convert_one(in_path, out_path, blender, no_patch=False, verify=False):
-    """转换单个文件。成功返回 True，失败返回 False。"""
+def convert_one(in_path, out_path, no_patch=False, verify=False):
+    """转换单个文件。成功返回 True，失败返回 False（不抛出，便于批量继续）。"""
     print(f"\n[info] input   = {in_path}")
     print(f"[info] output  = {out_path}")
 
@@ -171,23 +199,11 @@ def convert_one(in_path, out_path, blender, no_patch=False, verify=False):
 
     tmp_fbx = Path(tempfile.mktemp(suffix=".fbx"))
     try:
-        # 1. Blender 导出中间 FBX
-        run(
-            [
-                blender,
-                "--background",
-                "--factory-startup",
-                "--python",
-                CONVERT_SCRIPT,
-                "--",
-                in_path,
-                tmp_fbx,
-            ],
-            description=f"Blender 导出 {tmp_fbx.name}",
-        )
+        # 1. 进程内导出中间 FBX
+        print(f"[run] 导出 {tmp_fbx.name}")
+        _convert_module.convert(str(in_path), str(tmp_fbx))
 
-        # 2. patch USF=100（默认启用）—— 进程内调用 diagnose_fbx_units.patch，
-        #    无需系统 Python：用的是启动本脚本的解释器（系统 Python 或 Blender 皆可）。
+        # 2. patch USF=100（默认启用）——进程内调用 diagnose_fbx_units.patch。
         if not no_patch:
             print(f"[run] patch UnitScaleFactor → {out_path.name}")
             patch_fbx(str(tmp_fbx), str(out_path))
@@ -197,27 +213,15 @@ def convert_one(in_path, out_path, blender, no_patch=False, verify=False):
 
         print(f"[ok] 输出: {out_path}")
 
-        # 3. 可选验证
+        # 3. 可选验证（进程内回读）
         if verify:
-            run(
-                [
-                    blender,
-                    "--background",
-                    "--factory-startup",
-                    "--python",
-                    VERIFY_SCRIPT,
-                    "--",
-                    out_path,
-                ],
-                description=f"Blender 回读验证 {out_path.name}",
-            )
+            print(f"[run] 回读验证 {out_path.name}")
+            _verify_module.verify(str(out_path))
         return True
-    except SystemExit as e:
-        # run() 失败时调用 sys.exit，这里捕获并记为失败
-        if e.code != 0:
-            print(f"[error] 转换失败: {in_path}")
-            return False
-        raise
+    except Exception as e:
+        print(f"[error] 转换失败: {in_path}: {e}")
+        traceback.print_exc()
+        return False
     finally:
         if tmp_fbx.exists():
             tmp_fbx.unlink()
@@ -225,7 +229,7 @@ def convert_one(in_path, out_path, blender, no_patch=False, verify=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="3DXML → FBX 一键转换（Unity + Three.js 双兼容）"
+        description="3DXML → FBX 一键转换（Unity + Three.js 双兼容，基于 pip 版 bpy）"
     )
     parser.add_argument(
         "input",
@@ -255,24 +259,18 @@ def main():
     parser.add_argument(
         "--verify",
         action="store_true",
-        help="转换后使用 Blender 回读验证",
-    )
-    parser.add_argument(
-        "--blender",
-        help="临时指定 Blender 可执行文件路径（仅本次生效）",
+        help="转换后回读验证",
     )
     parser.add_argument(
         "--continue-on-error",
         action="store_true",
         help="批量模式下单个文件失败后继续处理其他文件",
     )
-    # 兼容两种启动：系统 Python（`python convert.py ...`）与 Blender
-    # （`blender --python convert.py -- ...`）。后者 sys.argv 含 Blender 自身参数，
-    # 需取 '--' 之后的参数。
-    raw_argv = sys.argv
-    args = parser.parse_args(
-        raw_argv[raw_argv.index('--') + 1:] if '--' in raw_argv else raw_argv[1:]
-    )
+    args = parser.parse_args()
+
+    # bpy wheel 仅 cp313：必要时切换到 Python 3.13，然后加载 bpy 与子模块。
+    ensure_python313()
+    setup_bpy_runtime()
 
     input_path = Path(args.input).resolve()
     input_files = collect_inputs(input_path, recursive=args.recursive)
@@ -285,21 +283,12 @@ def main():
         print("[error] 批量模式下第二个位置参数不可用，请用 -o/--output-dir 指定输出目录")
         sys.exit(1)
 
-    blender = args.blender
-    if not blender:
-        blender = find_blender()
-    if not blender:
-        fail_no_blender()
-    blender = Path(blender).resolve()
-    print(f"[info] blender = {blender}")
-
     # 单文件模式：output 为文件路径；批量模式：output 由 resolve_output_for_batch 决定
     if not is_batch:
         out_path = Path(args.output).resolve() if args.output else input_files[0].with_suffix(".fbx")
         ok = convert_one(
             input_files[0],
             out_path,
-            blender,
             no_patch=args.no_patch,
             verify=args.verify,
         )
@@ -325,7 +314,6 @@ def main():
         ok = convert_one(
             in_file,
             out_file,
-            blender,
             no_patch=args.no_patch,
             verify=args.verify,
         )

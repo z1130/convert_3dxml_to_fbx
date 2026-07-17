@@ -11,46 +11,68 @@
 
 ## 你需要装什么
 
-**只需要装 Blender（4.0 ~ 5.0）。** Python 不是必需的 —— 装了命令更短，不装也能用（走 Blender 自带的 Python）。
+**只需要 Python 3.13 + bpy 包。** 不需要安装 Blender。
 
-### 第一步：安装 Blender
+### 第一步：安装 Python 3.13
 
-1. 下载：<https://www.blender.org/download/>
-2. 版本：4.0 / 4.1 / 4.2 / 5.0 任一均可
-3. **强烈建议用默认路径安装**（Windows 下即 `C:\Program Files\Blender Foundation\Blender X.X\`）。默认路径装好后**无需任何配置**，工具会自动找到 Blender。
+bpy 官方 wheel 仅支持 Python 3.13（其他版本无法加载，会报 DLL load failed）。
 
-### 第二步：（仅当未用默认路径）告诉工具 Blender 在哪
+1. 下载：<https://www.python.org/downloads/release/python-3130/>
+2. 安装时勾选 “Add python.exe to PATH”。
+3. **强烈建议用默认路径安装**（Windows 下即 `C:\Users\<用户名>\AppData\Local\Programs\Python\Python313\`）。默认路径装好后**无需任何配置**，工具会自动找到。
 
-如果 Blender 装在非默认路径，三选一即可：
+### 第二步：安装 bpy（一次性）
 
-- **改 `config.json`（推荐）**：用记事本打开本目录下的 `config.json`，把 `blender_path` 填成你的 `blender.exe` 完整路径，例如：
+打开命令行（在工具文件夹地址栏输入 `cmd` 回车），执行：
+
+```bash
+"C:/Users/<用户名>/AppData/Local/Programs/Python/Python313/python.exe" -m pip install bpy --target=./pip
+```
+
+- 把 `<用户名>` 换成你的实际用户名。
+- `--target=./pip` 把 bpy 装到工具目录下的 `pip/` 子目录，**不污染系统环境**。
+- 下载量约 350MB，请耐心等待。
+- 装好后工具目录下会出现 `pip/` 文件夹。
+
+### 第三步：（仅当未用默认路径）告诉工具 Python 3.13 在哪
+
+如果 Python 3.13 装在非默认路径，二选一即可：
+
+- **改 `config.json`（推荐）**：用记事本打开本目录下的 `config.json`，把 `python_path` 填成你的 `python.exe` 完整路径，例如：
   ```json
   {
-    "blender_path": "D:/MyApps/Blender/blender.exe"
+    "python_path": "D:/Python313/python.exe"
   }
   ```
-- **设环境变量**：新增系统环境变量 `BLENDER`，值设为 `blender.exe` 完整路径。
-- **临时指定**：每次转换命令里加 `--blender "你的路径/blender.exe"`。
+- **设环境变量**：新增系统环境变量 `PYTHON313`，值设为 `python.exe` 完整路径。
+
+### Linux 用户
+
+```bash
+# 1. 装 Python 3.13（Ubuntu/Debian 示例；其他发行版用对应包管理器）
+sudo apt install python3.13 python3-pip
+
+# 2. 装 bpy 到项目 ./pip（pip 会自动拉 manylinux wheel）
+python3.13 -m pip install bpy --target=./pip
+
+# 3. 转换（python3.13 通常已在 PATH，无需改 config.json）
+python3.13 convert.py input.3dxml
+```
+
+> 若 `import bpy` 报缺失 `.so`（如 `libGL.so`、`libX11.so`），bpy 依赖系统图形库，执行：
+> `sudo apt install libgl1 libxi6 libxxf86vm1 libxfixes3 libxrender1`
 
 ---
 
 ## 怎么用
 
-打开命令行：在工具文件夹的地址栏输入 `cmd` 回车，然后按下面操作。
+打开命令行（在工具文件夹的地址栏输入 `cmd` 回车），然后执行：
 
-### 情况 A：装了 Python（命令更短）
-
-```
+```bash
 python convert.py input.3dxml
 ```
 
-### 情况 B：没装 Python（用 Blender 自带的 Python）
-
-```
-"C:/Program Files/Blender Foundation/Blender 5.0/blender.exe" --background --factory-startup --python convert.py -- input.3dxml
-```
-
-> 路径里的版本号 `5.0` 按你实际装的版本改。`--` 后面跟的是参数。
+> 即使 `python` 默认不是 3.13，工具也会自动找到 3.13 并切换，无需手动指定解释器。
 
 ### 常用参数
 
@@ -61,16 +83,20 @@ python convert.py input.3dxml
 | 批量转换整个目录 | `python convert.py 某目录/ -o 输出目录/` |
 | 递归扫描子目录 | `python convert.py 某目录/ -r -o 输出目录/` |
 | 批量时单个失败也继续 | 末尾加 `--continue-on-error` |
-| 转换后自检（Blender 回读验证） | 末尾加 `--verify` |
-
-> 没装 Python 时，把上表里的 `python convert.py` 替换成情况 B 那段 `"...blender.exe" --background --factory-startup --python convert.py --`，后面参数照搬。
+| 转换后自检（回读验证） | 末尾加 `--verify` |
 
 ---
 
 ## 常见问题
 
-**Q: 报错「找不到 Blender」。**
-A: 你没按默认路径装 Blender，也没配 `config.json`。回到上面"第二步"配置一次。
+**Q: 报错「找不到 Python 3.13」。**
+A: 你没装 Python 3.13，或装在非默认路径且没配 `config.json`。回到上面“第一步 / 第三步”。
+
+**Q: 报错「未找到 bpy 安装目录: .../pip」。**
+A: 你没执行第二步安装 bpy。在工具目录下跑 `"<Python313>/python.exe" -m pip install bpy --target=./pip`。
+
+**Q: 报错「加载 bpy 失败 ... DLL load failed」。**
+A: 当前 Python 版本不对。bpy wheel 仅支持 Python 3.13，确认装的是 3.13。
 
 **Q: 报错「输入文件不是 .3dxml」。**
 A: 文件后缀不对。本工具只接受 `.3dxml` 后缀的文件。

@@ -13,24 +13,43 @@
 
 | 项 | 要求 |
 |---|---|
-| Blender | 5.0 推荐（4.x 通常也可工作） |
-| Python 依赖 | **无**（脚本仅用 Blender 内置 `bpy` + Python 标准库） |
+| Python | **3.13**（bpy 官方 wheel 仅发布 cp313，其他版本无法加载） |
+| bpy 包 | 安装到本项目 `./pip` 目录（见 `SETUP.md`） |
 
-> 核心转换脚本必须在 Blender 内运行（普通 `python` 无法 `import bpy`）。`convert.py` 会代为调用 Blender，用户无需手动写 Blender 命令。
+> 核心转换脚本依赖 `bpy`（Blender Foundation 官方 PyPI 包），**无需安装 Blender**。`convert.py` 顶部把 `./pip` 注入 `sys.path` 后在进程内直接调用，无需手动写 Blender 命令。
 
 ---
 
 ## 二、配置
 
-编辑 `config.json`，填写本机 Blender 路径：
+### 首次安装 bpy
+
+`bpy` 是 Blender Foundation 官方 PyPI 包，**必须 Python 3.13**，且需装到项目根目录 `./pip` 下：
+
+```bash
+# Windows
+"C:/Users/<用户名>/AppData/Local/Programs/Python/Python313/python.exe" -m pip install bpy --target=./pip
+
+# Linux
+python3.13 -m pip install bpy --target=./pip
+```
+
+- 把 `<用户名>` 换成你的实际用户名。
+- 下载量约 350MB，请耐心等待。
+- 装好后工具目录下会出现 `pip/` 文件夹。
+- Windows 与 Linux 不能混用 `./pip`，各系统需各自重装。
+
+### 指定 Python 3.13 路径（可选）
+
+若 `python` 默认不是 3.13，或 Python 3.13 装在非默认路径，编辑 `config.json` 指定解释器路径：
 
 ```json
 {
-  "blender_path": "E:/Blender/blender.exe"
+  "python_path": "C:/Users/<用户名>/AppData/Local/Programs/Python/Python313/python.exe"
 }
 ```
 
-若未配置，wrapper 会依次尝试 `BLENDER` 环境变量、`PATH` 中的 `blender`，以及常见安装路径。
+若未配置，`convert.py` 会依次尝试 `PYTHON313` 环境变量、`PATH` 中的 `python3.13`，以及常见安装路径，找到后自动用 `os.execv` 切换到 3.13 运行。
 
 ---
 
@@ -63,9 +82,9 @@ python convert.py input.3dxml --no-patch
 
 执行后会自动完成：
 
-1. Blender headless 导出中间 FBX。
-2. `diagnose_fbx_units.py --patch` 将 `UnitScaleFactor` 设为 `100.0`，使 Unity 视觉尺寸与 Three.js 一致。
-3. 若带 `--verify`，再用 Blender 回读校验结构/几何/材质。
+1. 进程内调用 `bpy` 导出中间 FBX。
+2. `diagnose_fbx_units.patch` 将 `UnitScaleFactor` 设为 `100.0`，使 Unity 视觉尺寸与 Three.js 一致。
+3. 若带 `--verify`，再用 bpy 回读校验结构/几何/材质。
 4. 输出目录不存在时自动创建（单文件 `out/output.fbx` 或批量 `-o output_fbx` 均适用）。
 
 ### 参数说明
@@ -77,8 +96,7 @@ python convert.py input.3dxml --no-patch
 | `-o, --output-dir` | 批量模式下指定输出目录 | 与输入同目录 | `python convert.py resources/ -o output_fbx` |
 | `-r, --recursive` | 递归扫描子目录中的 `.3dxml` | 仅当前目录 | `python convert.py resources -r -o output_fbx` |
 | `--no-patch` | 跳过 USF=100 patch | 默认启用 patch | `python convert.py input.3dxml --no-patch` |
-| `--verify` | 转换后 Blender 回读验证 | 默认不验证 | `python convert.py input.3dxml --verify` |
-| `--blender` | 临时指定 Blender 路径 | 读取配置/环境变量 | `python convert.py input.3dxml --blender "E:/Blender/blender.exe"` |
+| `--verify` | 转换后回读验证 | 默认不验证 | `python convert.py input.3dxml --verify` |
 | `--continue-on-error` | 批量模式下单个失败后继续 | 默认遇到失败即停止 | `python convert.py resources/ -o output_fbx --continue-on-error` |
 
 ---
@@ -96,7 +114,7 @@ python convert.py input.3dxml --no-patch
 
 ## 五、验证产物
 
-### 1. Blender 回读（结构/几何/材质核对）
+### 1. bpy 回读（结构/几何/材质核对）
 
 ```bash
 python convert.py input.3dxml --verify
@@ -141,11 +159,11 @@ http://127.0.0.1:8000/__test__/test_fbx_loader.html?model=../input.fbx
 
 ## 七、手动调用（高级用户 / 故障排查）
 
-若不想用 wrapper，可手动执行两步：
+若不想用 wrapper，可手动执行两步（需用 Python 3.13，脚本会自动加载 `./pip/bpy`）：
 
 ```bash
-# 1. Blender 导出
-"E:/Blender/blender.exe" --background --factory-startup --python convert_3dxml_to_fbx.py -- input.3dxml input.fbx
+# 1. bpy 导出
+python convert_3dxml_to_fbx.py input.3dxml input.fbx
 
 # 2. patch USF=100（Unity 兼容必需）
 python diagnose_fbx_units.py --patch input.fbx input.fbx
@@ -178,7 +196,7 @@ axis_up='Y',         # 可选: 'Y' / 'Z'   ← CAD/3DXML 常见为 Y-up 或 Z-up
 |---|---|
 | **根目录（核心）** | |
 | `convert.py` | **一键转换 wrapper**（自动 export + patch + 可选 verify） |
-| `config.json` | Blender 路径配置（随仓库提交，用户拿到后修改本地路径） |
+| `config.json` | Python 3.13 路径配置（`python_path`，随仓库提交，用户拿到后修改本地路径） |
 | `convert_3dxml_to_fbx.py` | **主转换脚本**（被 wrapper 调用） |
 | `diagnose_fbx_units.py` | FBX 单位元数据读写/修补（`--patch` 写 `UnitScaleFactor=100`，Unity 兼容） |
 | `build.py` | 一键构建分发包到 `dist/`（发给用户） |
@@ -211,19 +229,16 @@ python build.py
 |---|---|
 | `convert.py` / `convert_3dxml_to_fbx.py` / `diagnose_fbx_units.py` | 核心转换 |
 | `__test__/verify_fbx.py` | `--verify` 依赖 |
-| `config.json` | `blender_path` 留空，走自动探测 |
+| `config.json` | `python_path` 留空，走自动探测 |
 | `README.md` / `SETUP.md` | 完整文档 / 用户向安装文档 |
 
 ### 2. 用户需要装什么
 
-**只需装 Blender（4.0 ~ 5.0），默认路径安装即可免配置。** Python 非必需——`convert.py` 支持双模式启动：
+**装 Python 3.13 + bpy 包（装到 `./pip`），默认路径安装即可免配置。** 不需要安装 Blender。详见分发包内的 `SETUP.md`。
 
-| 用户情况 | 命令 |
-|---|---|
-| 装了 Python（命令更短） | `python convert.py input.3dxml` |
-| 只有 Blender | `"C:/Program Files/Blender Foundation/Blender 5.0/blender.exe" --background --factory-startup --python convert.py -- input.3dxml` |
+> `./pip`（bpy 依赖，350MB+）不打包进 dist，用户拿到分发包后需自行执行：`"<Python313>/python.exe" -m pip install bpy --target=./pip`
 
-详见分发包内的 `SETUP.md`。脚本更新后再次执行 `python build.py` 即可刷新分发包（会先清空旧目录）。
+脚本更新后再次执行 `python build.py` 即可刷新分发包（会先清空旧目录）。
 
 ---
 

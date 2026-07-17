@@ -10,8 +10,10 @@ Output is engineered for compatibility with three.js THREE.FBXLoader:
   - per-face RGBA color -> multi-material mesh
   - pure triangulated meshes, no animation/bones
 
-Run inside Blender (headless):
-  blender --background --python convert_3dxml_to_fbx.py -- input.3dxml output.fbx
+Runs on the pip-installed `bpy` module (Python 3.13). Either call directly:
+  python convert_3dxml_to_fbx.py input.3dxml output.fbx
+or import in-process:
+  from convert_3dxml_to_fbx import convert; convert(in, out)
 """
 import os
 import sys
@@ -19,12 +21,22 @@ import zipfile
 import tempfile
 import traceback
 import xml.etree.ElementTree as ET
-from mathutils import Matrix, Vector
+
+# 允许在系统 Python（3.13）下直接运行：把同目录 ./pip 加入 sys.path 以加载 bpy。
+# 进程内 import 时 sys.path 已含则跳过；目录不存在则跳过（兼容旧式 Blender 内运行）。
+_PIP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pip')
+if os.path.isdir(_PIP_DIR) and _PIP_DIR not in sys.path:
+    sys.path.insert(0, _PIP_DIR)
 
 try:
     import bpy
+    from mathutils import Matrix, Vector
 except ImportError:
-    raise SystemExit("This script must be run inside Blender (no 'bpy' module).")
+    raise SystemExit(
+        "无法加载 bpy。请在项目根目录执行（需 Python 3.13）：\n"
+        "  \"C:/Path/To/Python313/python.exe\" -m pip install bpy --target=./pip\n"
+        "bpy wheel 仅支持 cp313，不能用其他 Python 版本加载。"
+    )
 
 XSI_TYPE = '{http://www.w3.org/2001/XMLSchema-instance}type'
 MM_TO_M = 0.001  # 3DXML geometry/translation are in mm; export in meters so FBX root scale=1
@@ -387,22 +399,26 @@ def export_fbx(filepath):
 
 
 # --------------------------------------------------------------------------- #
-# main
+# entry points
 # --------------------------------------------------------------------------- #
-def main():
-    global TMPDIR, REFERENCES, INSTANCES, NODE_COUNT
-    argv = sys.argv
-    if '--' in argv:
-        argv = argv[argv.index('--') + 1:]
-    else:
-        argv = []
+def convert(in_path, out_path):
+    """Convert one 3DXML zip to FBX.
 
-    if len(argv) < 2:
-        print("[error] 用法: blender --background --python convert_3dxml_to_fbx.py -- <input.3dxml> <output.fbx>")
-        sys.exit(1)
+    Callable in-process (no Blender subprocess). Resets module-level globals
+    on every call so it is safe to invoke repeatedly in batch mode — PARSE_CACHE
+    in particular must not leak across files, since TMPDIR changes each call
+    and a stale cache would read the wrong extracted geometry.
+    """
+    global TMPDIR, REFERENCES, INSTANCES, NODE_COUNT, MESH_COUNT, PARSE_CACHE
+    TMPDIR = None
+    REFERENCES = None
+    INSTANCES = None
+    PARSE_CACHE = {}
+    NODE_COUNT = 0
+    MESH_COUNT = 0
 
-    in_path = os.path.abspath(argv[0])
-    out_path = os.path.abspath(argv[1])
+    in_path = os.path.abspath(in_path)
+    out_path = os.path.abspath(out_path)
 
     print(f"[info] blender  = {bpy.app.version_string}")
     print(f"[info] input    = {in_path}")
@@ -474,8 +490,19 @@ def main():
     if os.path.exists(out_path):
         print(f"[ok] FBX written: {out_path} ({os.path.getsize(out_path)} bytes)")
     else:
-        print("[error] FBX not written")
+        raise RuntimeError(f"FBX not written: {out_path}")
+
+
+def main():
+    argv = sys.argv
+    if '--' in argv:  # 兼容 `blender --python ... --` 旧调用
+        argv = argv[argv.index('--') + 1:]
+    else:
+        argv = argv[1:]  # 系统 Python 直接运行：去掉脚本名
+    if len(argv) < 2:
+        print("[error] 用法: python convert_3dxml_to_fbx.py <input.3dxml> <output.fbx>")
         sys.exit(1)
+    convert(argv[0], argv[1])
 
 
 if __name__ == '__main__':
