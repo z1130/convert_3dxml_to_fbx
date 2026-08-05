@@ -1,0 +1,11 @@
+.vscode
+__pycache__/
+resources/
+dist/
+dist.tar
+build/
+/vendor/
+_version.py
+*.fbx
+*.3dxml
+*.zip

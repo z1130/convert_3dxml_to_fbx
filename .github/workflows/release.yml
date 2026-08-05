@@ -1,0 +1,62 @@
+# Tag 触发的自动发布：git tag v1.0.1 && git push --tags
+# 流程：装 Python 3.13 → 装依赖到 vendor/（有缓存）→ Nuitka 构建 → 打包 zip → 创建 Release
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # 创建 Release 需要
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest # Nuitka 不支持交叉编译，Windows 产物必须 Windows runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13" # bpy wheel 仅 cp313
+
+      # vendor/ 约 400MB（bpy + flask + nuitka），缓存后后续构建只需几秒恢复。
+      # 依赖版本钉在 requirements.txt，key 含其哈希——改版本号缓存自动失效重装，无需手动 bump。
+      - name: Cache vendor
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: ${{ runner.os }}-vendor-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies into vendor/
+        run: python -m pip install -r requirements.txt --target=vendor
+
+      # Nuitka 编译（首次约 20-40 分钟；windows-latest 自带 VS 2022，--msvc=latest 可用）
+      # CONVERTER_VERSION 取 tag 名（如 v1.0.1），build.py 生成 _version.py 编译进产物
+      - name: Build dist (Nuitka)
+        env:
+          CONVERTER_VERSION: ${{ github.ref_name }}
+        run: python tools/build.py
+
+      # 压缩：converter.exe 在 zip 顶层，与手工发布格式一致
+      - name: Zip dist
+        run: |
+          python -c "import shutil; shutil.make_archive('3dxml-converter-windows-x64', 'zip', root_dir='dist')"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: 3dxml-converter-windows-x64.zip
+          body: |
+            ## 下载与使用（Windows 10+）
+            1. 下载 `3dxml-converter-windows-x64.zip`
+            2. 解压后双击 `converter.exe` 打开 Web 界面
+            3. 拖入 .3dxml 文件即可转换为 FBX（同时兼容 Three.js 与 Unity）
+
+            无需安装 Python 或 Blender，解压即用、离线可用。详细说明见包内 `SETUP.md`。
+
+            ## 源码运行（Source code）
+            1. 下载 Source code (zip) 并解压
+            2. 安装 Python 3.13（bpy wheel 仅支持 cp313）
+            3. 安装依赖：`pip install -r requirements.txt --target=./vendor`
+            4. 启动 Web 界面：`python app.py`；命令行转换：`python convert.py input.3dxml`
